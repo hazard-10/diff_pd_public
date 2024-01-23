@@ -9,7 +9,7 @@ def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
     origin = np.asarray(origin, dtype=np.float64)
     cell_x, cell_y, cell_z = voxels.shape
     node_x, node_y, node_z = cell_x + 1, cell_y + 1, cell_z + 1
-    vertex_flag = np.full((node_x, node_y, node_z), -1, dtype=np.int)
+    vertex_flag = np.full((node_x, node_y, node_z), -1, dtype=np.int32)
     for i in range(cell_x):
         for j in range(cell_y):
             for k in range(cell_z):
@@ -31,7 +31,7 @@ def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
                         origin[2] + dx * k))
                     vertex_cnt += 1
 
-    voxel_indices = np.full((cell_x, cell_y, cell_z), -1, dtype=np.int)
+    voxel_indices = np.full((cell_x, cell_y, cell_z), -1, dtype=np.int32)
     index = 0
 
     faces = []
@@ -49,7 +49,7 @@ def generate_hex_mesh(voxels, dx, origin, bin_file_name, write=True):
                     index += 1
 
     vertices = np.asarray(vertices, dtype=np.float64).T
-    faces = np.asarray(faces, dtype=np.int).T
+    faces = np.asarray(faces, dtype=np.int32).T
 
     if write:
         with open(bin_file_name, 'wb') as f:
@@ -405,7 +405,7 @@ def filter_hex(hex_mesh, active_elements):
     faces = []
     for e_idx in active_elements:
         faces.append([remap[ei] for ei in list(hex_mesh.py_element(e_idx))])
-    faces = ndarray(faces).astype(np.int)
+    faces = ndarray(faces).astype(np.int32)
     tmp_file_name = '.tmp.bin'
 
     vertices = vertices.T
@@ -451,7 +451,7 @@ def voxelize(triangle_mesh_file_name, dx, feather=0.0):
     assert 0 < dx <= 0.5
 
     # Voxelization.
-    cell_num = (ndarray(tri_mesh.bounding_box.extents) / dx).astype(np.int)
+    cell_num = (ndarray(tri_mesh.bounding_box.extents) / dx).astype(np.int32)
     voxels = np.zeros(cell_num)
     for i in range(cell_num[0]):
         for j in range(cell_num[1]):

@@ -22,7 +22,7 @@ def generate_tri_mesh(vertices, faces, file_name, compute_normal=False):
                 f.write(struct.pack('d', v[1]))
 
             # Faces.
-            faces = ndarray(faces).astype(np.int)
+            faces = ndarray(faces).astype(np.int32)
             face_num, _ = faces.shape
             f.write(struct.pack('i', 3))
             f.write(struct.pack('i', face_num))
@@ -72,7 +72,7 @@ def tri2obj(tri_mesh, obj_file_name=None):
     f = []
     for i in range(element_num):
         f.append(ndarray(tri_mesh.py_element(i)))
-    f = ndarray(f).astype(np.int)
+    f = ndarray(f).astype(np.int32)
 
     if obj_file_name is not None:
         with open(obj_file_name, 'w') as f_obj:
@@ -118,7 +118,7 @@ def generate_circle_mesh(origin, radius, radius_bin_num, angle_bin_num, bin_file
             face.append([i00, i10, i11])
             face.append([i00, i11, i01])
 
-    face = ndarray(face).astype(np.int)
+    face = ndarray(face).astype(np.int32)
 
     generate_tri_mesh(vert, face, bin_file_name)
 

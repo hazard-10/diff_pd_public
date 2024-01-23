@@ -23,13 +23,13 @@ def generate_rectangle_mesh(cell_nums, dx, origin, bin_file_name):
                 vy = origin[1] + j * dx
                 f.write(struct.pack('d', vy))
 
-        voxel_indices = np.full((nx, ny), -1, dtype=np.int)
+        voxel_indices = np.full((nx, ny), -1, dtype=np.int32)
         index = 0
         for i in range(nx):
             for j in range(ny):
                 voxel_indices[i, j] = index
                 index += 1
-        vertex_indices = np.full((nx + 1, ny + 1), -1, dtype=np.int)
+        vertex_indices = np.full((nx + 1, ny + 1), -1, dtype=np.int32)
         index = 0
         for i in range(nx + 1):
             for j in range(ny + 1):

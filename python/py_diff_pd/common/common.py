@@ -147,7 +147,7 @@ def filter_unused_vertices(vertices, elements):
     for e in elements:
         new_ei = [remap[ei] for ei in e]
         new_elements.append(new_ei)
-    new_elements = ndarray(new_elements).astype(np.int)
+    new_elements = ndarray(new_elements).astype(np.int32)
     return new_vertices, new_elements
 
 import struct

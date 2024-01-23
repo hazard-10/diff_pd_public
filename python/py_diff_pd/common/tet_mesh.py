@@ -23,7 +23,7 @@ def generate_tet_mesh(vertices, faces, bin_file_name):
             f.write(struct.pack('d', v[2]))
 
         # Faces.
-        faces = ndarray(faces).astype(np.int)
+        faces = ndarray(faces).astype(np.int32)
         face_num, _ = faces.shape
         f.write(struct.pack('i', 4))
         f.write(struct.pack('i', face_num))
@@ -52,7 +52,7 @@ def fix_tet_faces(verts):
             (2, 0, 3),
         ]
 
-    return ndarray(f).astype(np.int)
+    return ndarray(f).astype(np.int32)
 
 # Given a tet mesh, save it as an obj file with texture coordinates.
 def tet2obj_with_textures(tet_mesh, obj_file_name=None, pbrt_file_name=None):
@@ -290,7 +290,7 @@ def tetrahedralize(triangle_mesh_file_name, visualize=False, normalize_input=Tru
     # http://wias-berlin.de/software/tetgen/1.5/doc/manual/manual006.html#ff_ele.
     # In both cases, the first four columns of elements are the tets.
     nodes = ndarray(nodes)
-    elements_unsigned = ndarray(elements).astype(np.int)[:, :4]
+    elements_unsigned = ndarray(elements).astype(np.int32)[:, :4]
 
     # Fix the sign of elements if necessary.
     elements = []
@@ -301,7 +301,7 @@ def tetrahedralize(triangle_mesh_file_name, visualize=False, normalize_input=Tru
             elements.append(e)
         else:
             elements.append([e[0], e[2], e[1], e[3]])
-    elements = ndarray(elements).astype(np.int)
+    elements = ndarray(elements).astype(np.int32)
     return filter_unused_vertices(nodes, elements)
 
 # Input:
