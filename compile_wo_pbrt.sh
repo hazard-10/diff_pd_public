@@ -1,3 +1,7 @@
+# remove exisiting .py, .so files
+rm -f python/py_diff_pd/core/py_diff_pd_core.py
+rm -f python/py_diff_pd/core/_py_diff_pd_core.so
+
 cd cpp/core/src
 swig -c++ -python py_diff_pd_core.i
 
