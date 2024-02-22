@@ -159,6 +159,17 @@ public:
         const std::map<int, real>& additional_dirichlet_boundary_condition,
         const bool use_acc, const bool use_sparse) const;
 
+    // For shape targeting. Energy will be defined solely as functions instead of classes.
+        // add new python binding for shape targeting
+    void PyShapeTargetingForward(const std::vector<real>& q, const std::vector<real>& v,
+        const std::vector<real>& act, const real dt, const std::map<std::string, real>& options,
+        std::vector<real>& q_next, std::vector<real>& v_next) const;
+        // main forward solver
+    void ShapeTargetingForward(const VectorXr& q, const VectorXr& v, const VectorXr& act, const real dt,
+        const std::map<std::string, real>& options, VectorXr& q_next, VectorXr& v_next) const;
+        // Prefactorize the matrix
+    void SetupShapeTargetingSolver(const real dt, const std::map<std::string, real>& options) const;
+
 protected:
     void ForwardSemiImplicit(const VectorXr& q, const VectorXr& v, const VectorXr& a, const VectorXr& f_ext,
         const real dt, const std::map<std::string, real>& options, VectorXr& q_next, VectorXr& v_next,

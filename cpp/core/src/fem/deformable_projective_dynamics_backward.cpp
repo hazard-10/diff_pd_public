@@ -121,7 +121,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ApplyProjectiveDynamicsLocal
 
 template<int vertex_dim, int element_dim>
 void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::string& method, const VectorXr& q, const VectorXr& v,
-    const VectorXr& a, const VectorXr& f_ext, const real dt, const VectorXr& q_next, const VectorXr& v_next,
+    const VectorXr& musc_act, const VectorXr& f_ext, const real dt, const VectorXr& q_next, const VectorXr& v_next,
     const std::vector<int>& active_contact_idx, const VectorXr& dl_dq_next, const VectorXr& dl_dv_next,
     const std::map<std::string, real>& options, VectorXr& dl_dq, VectorXr& dl_dv, VectorXr& dl_da, VectorXr& dl_df_ext,
     VectorXr& dl_dmat_w, VectorXr& dl_dact_w, VectorXr& dl_dstate_p) const {
@@ -189,7 +189,7 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
     std::vector<std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>> pd_backward_local_muscle_matrices;
     const bool use_precomputed_data = !pd_element_energies_.empty();
     if (use_precomputed_data) ComputeDeformationGradientAuxiliaryDataAndProjection(q_next);
-    SetupProjectiveDynamicsLocalStepDifferential(q_next, a, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices);
+    SetupProjectiveDynamicsLocalStepDifferential(q_next, musc_act, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices);
 
     // Forward:
     // Step 1:
@@ -209,8 +209,8 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
     //     }
     // }
     // Step 4:
-    // q_next - h2m * (f_pd(q_next) + f_act(q_next, a) + f_ela(q_next)) = rhs.
-    // inv_h2m * q_next - (f_pd(q_next) + f_act(q_next, a) + f_ela(q_next)) = inv_h2m * rhs.
+    // q_next - h2m * (f_pd(q_next) + f_act(q_next, musc_act) + f_ela(q_next)) = rhs.
+    // inv_h2m * q_next - (f_pd(q_next) + f_act(q_next, musc_act) + f_ela(q_next)) = inv_h2m * rhs.
     std::map<int, real> augmented_dirichlet = dirichlet_;
     std::map<int, real> additional_dirichlet;
     for (const int idx : active_contact_idx) {
@@ -232,17 +232,17 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
     // Step 4:
     // Newton equivalence:
     // Eigen::SimplicialLDLT<SparseMatrix> cholesky;
-    // const SparseMatrix op = NewtonMatrix(q_next, a, inv_h2m, augmented_dirichlet);
+    // const SparseMatrix op = NewtonMatrix(q_next, musc_act, inv_h2m, augmented_dirichlet);
     // cholesky.compute(op);
     // const VectorXr dl_drhs_intermediate = cholesky.solve(dl_dq_next_agg);
     // CheckError(cholesky.info() == Eigen::Success, "Cholesky solver failed.");
     VectorXr dl_drhs_intermediate;
     if (material_) {
-        const SparseMatrix op = NewtonMatrix(q_next, a, inv_h2m, augmented_dirichlet, use_precomputed_data);
+        const SparseMatrix op = NewtonMatrix(q_next, musc_act, inv_h2m, augmented_dirichlet, use_precomputed_data);
         if (EndsWith(method, "pcg")) {
             // The user is using a non-PD material model. Need special treatment.
             // Eigen::SimplicialLDLT<SparseMatrix> cholesky;
-            // const SparseMatrix op = NewtonMatrix(q_next, a, inv_h2m, augmented_dirichlet, use_precomputed_data);
+            // const SparseMatrix op = NewtonMatrix(q_next, musc_act, inv_h2m, augmented_dirichlet, use_precomputed_data);
             // cholesky.compute(op);
             // const VectorXr dl_drhs_intermediate = cholesky.solve(dl_dq_next_agg);
             // CheckError(cholesky.info() == Eigen::Success, "Cholesky solver failed.");
@@ -289,7 +289,7 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
             selected(pair.first) = 0;
         }
         VectorXr Sx_sol = PdLhsMatrixOp(x_sol, additional_dirichlet) - ApplyProjectiveDynamicsLocalStepDifferential(q_next,
-            a, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol);
+            musc_act, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol);
         VectorXr grad_sol = (Sx_sol - dl_dq_next_agg).array() * selected.array();
         real obj_sol = 0.5 * x_sol.dot(Sx_sol) - dl_dq_next_agg.dot(x_sol);
         bool success = false;
@@ -367,7 +367,7 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
                 VectorXr x_sol_next = x_sol - step_size * quasi_newton_direction;
                 VectorXr Sx_sol_next = PdLhsMatrixOp(x_sol_next, additional_dirichlet) -
                     ApplyProjectiveDynamicsLocalStepDifferential(q_next,
-                        a, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol_next);
+                        musc_act, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol_next);
                 VectorXr grad_sol_next = (Sx_sol_next - dl_dq_next_agg).array() * selected.array();
                 real obj_next = 0.5 * x_sol_next.dot(Sx_sol_next) - dl_dq_next_agg.dot(x_sol_next);
                 const real gamma = ToReal(1e-4);
@@ -385,7 +385,7 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
                     x_sol_next = x_sol - step_size * quasi_newton_direction;
                     Sx_sol_next = PdLhsMatrixOp(x_sol_next, additional_dirichlet) -
                         ApplyProjectiveDynamicsLocalStepDifferential(q_next,
-                            a, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol_next);
+                            musc_act, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol_next);
                     grad_sol_next = (Sx_sol_next - dl_dq_next_agg).array() * selected.array();
                     obj_next = 0.5 * x_sol_next.dot(Sx_sol_next) - dl_dq_next_agg.dot(x_sol_next);
                     if (verbose_level > 0) PrintInfo("Line search iteration: " + std::to_string(j));
@@ -414,13 +414,13 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
             } else {
                 // Update w/o BFGS.
                 // Local step:
-                const VectorXr pd_rhs = (dl_dq_next_agg + ApplyProjectiveDynamicsLocalStepDifferential(q_next, a,
+                const VectorXr pd_rhs = (dl_dq_next_agg + ApplyProjectiveDynamicsLocalStepDifferential(q_next, musc_act,
                     pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol)
                 ).array() * selected.array();
                 // Global step:
                 x_sol = (PdLhsSolve(method, pd_rhs, additional_dirichlet, use_acc, use_sparse).array() * selected.array());
                 Sx_sol = PdLhsMatrixOp(x_sol, additional_dirichlet) - ApplyProjectiveDynamicsLocalStepDifferential(q_next,
-                    a, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol);
+                    musc_act, pd_backward_local_element_matrices, pd_backward_local_muscle_matrices, x_sol);
                 grad_sol = (Sx_sol - dl_dq_next_agg).array() * selected.array();
                 obj_sol = 0.5 * x_sol.dot(Sx_sol) - dl_dq_next_agg.dot(x_sol);
             }
@@ -440,7 +440,7 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
             // Switch back to Newton's method.
             PrintWarning("PD backward: switching to Cholesky decomposition");
             Eigen::SimplicialLDLT<SparseMatrix> cholesky;
-            const SparseMatrix op = NewtonMatrix(q_next, a, inv_h2m, augmented_dirichlet, use_precomputed_data);
+            const SparseMatrix op = NewtonMatrix(q_next, musc_act, inv_h2m, augmented_dirichlet, use_precomputed_data);
             cholesky.compute(op);
             dl_drhs_intermediate = cholesky.solve(dl_dq_next_agg);
             CheckError(cholesky.info() == Eigen::Success, "Cholesky solver failed.");
@@ -451,23 +451,23 @@ void Deformable<vertex_dim, element_dim>::BackwardProjectiveDynamics(const std::
     // Now dl_drhs_free is correct. Working on dl_drhs_fixed next.
     for (const auto& pair: augmented_dirichlet) dl_drhs(pair.first) = dl_dq_next_agg(pair.first);
     // dl_drhs_fixed += -dl_dq_next_free * [dlhs/ dq_next_free]^(-1) * dlhs / drhs_fixed.
-    // Let J = [A,  B] = NewtonMatrixOp(q_next, a, inv_h2m, {}).
+    // Let J = [A,  B] = NewtonMatrixOp(q_next, musc_act, inv_h2m, {}).
     //         [B', C]
     // Let A corresponds to fixed dofs.
     // dl_drhs_fixed += -dl_dq_next_free * inv(C) * B'.
     // dl_drhs_intermediate_free = dl_dq_next_free * inv(C).
     VectorXr adjoint = dl_drhs_intermediate;
     for (const auto& pair : augmented_dirichlet) adjoint(pair.first) = 0;
-    const VectorXr dfixed = NewtonMatrixOp(q_next, a, inv_h2m, {}, -adjoint);
+    const VectorXr dfixed = NewtonMatrixOp(q_next, musc_act, inv_h2m, {}, -adjoint);
     for (const auto& pair : augmented_dirichlet) dl_drhs(pair.first) += dfixed(pair.first);
 
-    // Backpropagate a -> q_next and act_w -> q_next
+    // Backpropagate musc_act -> q_next and act_w -> q_next
     // inv_h2m * q_next_free - (f_ela(q_next_free; rhs_fixed) + f_pd(q_next_free; rhs_fixed)
-    //     + f_act(q_next_free; rhs_fixed, a)) = inv_h2m * rhs_free.
+    //     + f_act(q_next_free; rhs_fixed, musc_act)) = inv_h2m * rhs_free.
     // C * dq_next_free / da - df_act / da = 0.
     // dl_da += dl_dq_next_agg * inv(C) * df_act / da.
     SparseMatrixElements nonzeros_q, nonzeros_a, nonzeros_act_w;
-    ActuationForceDifferential(q_next, a, nonzeros_q, nonzeros_a, nonzeros_act_w);
+    ActuationForceDifferential(q_next, musc_act, nonzeros_q, nonzeros_a, nonzeros_act_w);
     dl_da += VectorSparseMatrixProduct(adjoint, dofs_, act_dofs_, nonzeros_a);
     dl_dact_w += VectorSparseMatrixProduct(adjoint, dofs_, act_w_dofs, nonzeros_act_w);
     // Equivalent code:
