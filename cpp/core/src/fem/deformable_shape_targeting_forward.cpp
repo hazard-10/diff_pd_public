@@ -54,8 +54,7 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingSolver(const real d
     
     // Part II: PD element energy: w_i * S'A'AS.
     // TODO: define energy
-    real w = 0;
-    for (const auto& energy : pd_element_energies_) w += energy->stiffness();
+    real w = shape_target_stiffness_;
     for (int i = 0; i < element_num; ++i) { // for each hex element
         const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(i); // get the 8 global vertex indices of the hex
         std::array<int, vertex_dim * element_dim> remap_idx; // construct a 3 x 8 array
@@ -126,6 +125,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
 
     // 1. do SetupProjectiveDynamicsSolver(method, dt, options); 
     // still need to define energy stifness for part 1
+    SetupShapeTargetingSolver(dt, options);
 
     // 2. setup the rhs    
     const real h = dt;
@@ -135,8 +135,8 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
     const real inv_h2m = mass / (dt * dt);
     const VectorXr rhs = q + h * v + h2m * ForwardStateForce(q, v);
 
-    // 3. similar to the fixed contact, we need to call PdNonlinearSolve
-    const int forwardIter = 5;
+    // 3. original solver takes multiple iterations only to update contact_index, 
+    //    the q and v is not updated in the loop. so we only call the solver once
     
     // update 2/21 
     // just realized that the act matrix is only used as actuation force / energy computation. It is not used otherwise in the PD solver.
@@ -148,6 +148,56 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
 
 
 // ------- Below is contains Shape Target Energy related functions -------
+
+
+// Precompute the deformation gradient auxiliary
+// Compare to ComputeDeformationGradientAuxiliaryDataAndProjection, we don't need projectToManifold
+// as we are dealing with R * A, not R alone
+template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q) const{
+    // exact same as ComputeDeformationGradientAuxiliaryDataAndProjection
+    const int element_num = mesh_.NumOfElements();
+    const int sample_num = GetNumOfSamplesInElement();
+    F_auxiliary_.resize(element_num);
+    #pragma omp parallel for
+    for (int i = 0; i < element_num; ++i) {
+        const auto deformed = ScatterToElement(q, i);
+        F_auxiliary_[i].resize(sample_num);
+        for (int j = 0; j < sample_num; ++j) {
+            const auto F = DeformationGradient(i, deformed, j);
+            F_auxiliary_[i][j].Initialize(F);
+        }
+    }
+    // skip the projection
+}
+
+// Design choice: pass actuation data everywhere with a 1d vector, 
+// only assemble the matrix before solving
+
+// ShapeTarget Energy. Modified from deformation_actuation.cpp/AcuationEnergy
+template<int vertex_dim, int element_dim>
+const real Deformable<vertex_dim, element_dim>::ShapeTargetingEnergy(const VectorXr& q, const VectorXr& act) const{
+    auto EnergyDensity = [&](const Eigen::Matrix<real, vertex_dim, vertex_dim>& F, 
+                            const Eigen::Matrix<real, vertex_dim, vertex_dim>& R,
+                            const Eigen::Matrix<real, vertex_dim, vertex_dim>& A) -> real {
+        return 0.5 * shape_target_stiffness_ * (F - R * A).squaredNorm();
+    };
+    return 0;  
+}
+// ShapeTarget Force
+template<int vertex_dim, int element_dim>
+const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetingForce(const VectorXr& q, const VectorXr& act) const{
+    auto StressTensor = [&](const Eigen::Matrix<real, vertex_dim, vertex_dim>& F, 
+                            const Eigen::Matrix<real, vertex_dim, vertex_dim>& R,
+                            const Eigen::Matrix<real, vertex_dim, vertex_dim>& A) -> Eigen::Matrix<real, vertex_dim, vertex_dim> {
+        return shape_target_stiffness_ * (F - R * A);
+    };
+
+    return VectorXr::Zero(q.size());
+}
+
+
+
 
 template class Deformable<2, 3>;
 template class Deformable<2, 4>;

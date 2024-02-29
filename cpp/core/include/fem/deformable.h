@@ -160,15 +160,23 @@ public:
         const bool use_acc, const bool use_sparse) const;
 
     // For shape targeting. Energy will be defined solely as functions instead of classes.
-        // add new python binding for shape targeting
+    // add new python binding for shape targeting
     void PyShapeTargetingForward(const std::vector<real>& q, const std::vector<real>& v,
         const std::vector<real>& act, const real dt, const std::map<std::string, real>& options,
         std::vector<real>& q_next, std::vector<real>& v_next) const;
-        // main forward solver
+    // main forward solver
     void ShapeTargetingForward(const VectorXr& q, const VectorXr& v, const VectorXr& act, const real dt,
         const std::map<std::string, real>& options, VectorXr& q_next, VectorXr& v_next) const;
-        // Prefactorize the matrix
+    // Prefactorize the matrix A
     void SetupShapeTargetingSolver(const real dt, const std::map<std::string, real>& options) const;
+    // pre-SVD deformation gradient
+    void ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q) const;
+    // Compute the energy & force
+    const real ShapeTargetingEnergy(const VectorXr& q, const VectorXr& act) const;
+    const VectorXr ShapeTargetingForce(const VectorXr& q, const VectorXr& act) const;
+
+    real shape_target_stiffness_ = 0.0;
+    
 
 protected:
     void ForwardSemiImplicit(const VectorXr& q, const VectorXr& v, const VectorXr& a, const VectorXr& f_ext,
