@@ -175,6 +175,9 @@ public:
     const real ShapeTargetingEnergy(const VectorXr& q, const VectorXr& act) const;
     const VectorXr ShapeTargetingForce(const VectorXr& q, const VectorXr& act) const;
 
+    // functional for debugging and verification
+    void PyGetShapeTargetSMatrixFromDeformation(const std::vector<real>& q, std::vector<real>& S) const;
+
     real shape_target_stiffness_ = 0.0;
     
 

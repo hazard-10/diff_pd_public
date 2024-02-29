@@ -19,7 +19,7 @@
 //        b. PD element energy: w_i * S'A'AS.
 //        c. Assemble and pre-factorize the matrix.
 //    var to write: 
-//        pd_lhs_ : A matrix from Ax = b
+//        pd_lhs_ : 'A' matrix from Ax = b
 //        pd_eigen_solver_: prefactorized A matrix, used for x = A^-1 * b
 //        solver_ready_: bool, if the solver is ready
 template<int vertex_dim, int element_dim>
@@ -157,10 +157,39 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetComputeAuxiliaryDeformation
         F_auxiliary_[i].resize(sample_num);
         for (int j = 0; j < sample_num; ++j) {
             const auto F = DeformationGradient(i, deformed, j);
-            F_auxiliary_[i][j].Initialize(F);
+            F_auxiliary_[i][j].Initialize(F); // Extract U, V, sig, R, S
         }
     }
     // skip the projection as R * A is not provided until later
+}
+
+template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::PyGetShapeTargetSMatrixFromDeformation(const std::vector<real>& q, std::vector<real>& S) const{
+    // same logic as ShapeTargetComputeAuxiliaryDeformationGradient
+    const int element_num = mesh_.NumOfElements();
+    const int sample_num = GetNumOfSamplesInElement();
+    VectorXr q_eigen = ToEigenVector(q);
+    F_auxiliary_.resize(element_num);
+    S.resize(element_num * sample_num * 6);
+    #pragma omp parallel for
+    for (int i = 0; i < element_num; ++i) {
+        const auto deformed = ScatterToElement(q_eigen, i);
+        F_auxiliary_[i].resize(sample_num);
+        for (int j = 0; j < sample_num; ++j) {
+            const auto F = DeformationGradient(i, deformed, j);
+            F_auxiliary_[i][j].Initialize(F); // Extract U, V, sig, R, S
+            // S is a 6x1 vector
+            // transform a symmetric 3x3 matrix to a 6x1 vector
+            auto S_mat = F_auxiliary_[i][j].S(); 
+            S[i * sample_num * 6 + j * 6 + 0] = S_mat(0, 0);
+            S[i * sample_num * 6 + j * 6 + 1] = S_mat(0, 1);
+            S[i * sample_num * 6 + j * 6 + 2] = S_mat(0, 2);
+            S[i * sample_num * 6 + j * 6 + 3] = S_mat(1, 1);
+            S[i * sample_num * 6 + j * 6 + 4] = S_mat(1, 2);
+            S[i * sample_num * 6 + j * 6 + 5] = S_mat(2, 2); 
+            // this would be the ideal action for each element
+        }
+    }
 }
 
 // Design choice: pass actuation data everywhere with a 1d vector, 
