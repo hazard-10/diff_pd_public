@@ -27,6 +27,7 @@ void Toc(const std::string& message);
 
 // Error checking.
 void CheckError(const bool condition, const std::string& error_message);
+void CheckShapeTargetParam(const std::map<std::string, real>& options);
 
 // Debugging.
 void PrintNumpyStyleMatrix(const MatrixXr& mat);

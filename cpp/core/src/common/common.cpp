@@ -65,6 +65,24 @@ void PrintSuccess(const std::string& message) {
     std::cout << GreenHead() << message << GreenTail() << std::endl;
 }
 
+void CheckShapeTargetParam(const std::map<std::string, real>& options) {
+    CheckError(options.find("max_pd_iter") != options.end(), "Missing option max_pd_iter.");
+    CheckError(options.find("thread_ct") != options.end(), "Missing option thread_ct.");
+    CheckError(options.find("abs_tol") != options.end(), "Missing option abs_tol.");
+    CheckError(options.find("rel_tol") != options.end(), "Missing option rel_tol.");
+    CheckError(options.find("verbose") != options.end(), "Missing option verbose.");
+    CheckError(options.find("use_bfgs") != options.end(), "Missing option use_bfgs.");
+    const bool use_bfgs = static_cast<bool>(options.at("use_bfgs"));
+    if (use_bfgs) {
+        CheckError(options.find("bfgs_history_size") != options.end(), "Missing option bfgs_history_size");
+        int bfgs_history_size = static_cast<int>(options.at("bfgs_history_size"));
+        CheckError(bfgs_history_size >= 1, "Invalid bfgs_history_size.");
+
+        CheckError(options.find("max_ls_iter") != options.end(), "Missing option max_ls_iter.");
+        int max_ls_iter = static_cast<int>(options.at("max_ls_iter"));
+        CheckError(max_ls_iter > 0, "Invalid max_ls_iter: " + std::to_string(max_ls_iter));
+    }
+}
 // Timing.
 static std::stack<timeval> t_begins;
 

@@ -99,11 +99,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
     // act :                  # of elements * 6
 
     // 0. Read options     
-    CheckError(options.find("max_pd_iter") != options.end(), "Missing option max_pd_iter.");
-    CheckError(options.find("abs_tol") != options.end(), "Missing option abs_tol.");
-    CheckError(options.find("rel_tol") != options.end(), "Missing option rel_tol.");
-    CheckError(options.find("verbose") != options.end(), "Missing option verbose.");
-    CheckError(options.find("use_bfgs") != options.end(), "Missing option use_bfgs.");
+    CheckShapeTargetParam(options);
     const int max_pd_iter = static_cast<int>(options.at("max_pd_iter"));
     const int thread_ct = static_cast<int>(options.at("thread_ct"));
     const real abs_tol = options.at("abs_tol");
@@ -113,12 +109,8 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
     int bfgs_history_size = 0;
     int max_ls_iter = 0;
     if (use_bfgs) {
-        CheckError(options.find("bfgs_history_size") != options.end(), "Missing option bfgs_history_size");
         bfgs_history_size = static_cast<int>(options.at("bfgs_history_size"));
-        CheckError(bfgs_history_size >= 1, "Invalid bfgs_history_size.");
-        CheckError(options.find("max_ls_iter") != options.end(), "Missing option max_ls_iter.");
         max_ls_iter = static_cast<int>(options.at("max_ls_iter"));
-        CheckError(max_ls_iter > 0, "Invalid max_ls_iter: " + std::to_string(max_ls_iter));
     }
     
     omp_set_num_threads(thread_ct);
@@ -168,7 +160,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetComputeAuxiliaryDeformation
             F_auxiliary_[i][j].Initialize(F);
         }
     }
-    // skip the projection
+    // skip the projection as R * A is not provided until later
 }
 
 // Design choice: pass actuation data everywhere with a 1d vector, 
