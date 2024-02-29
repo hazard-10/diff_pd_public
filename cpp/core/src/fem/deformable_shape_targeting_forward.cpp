@@ -170,7 +170,8 @@ void Deformable<vertex_dim, element_dim>::PyGetShapeTargetSMatrixFromDeformation
     const int sample_num = GetNumOfSamplesInElement();
     VectorXr q_eigen = ToEigenVector(q);
     F_auxiliary_.resize(element_num);
-    S.resize(element_num * sample_num * 6);
+    int s_vec_dim = 6;
+    S.resize(element_num * sample_num * s_vec_dim);
     #pragma omp parallel for
     for (int i = 0; i < element_num; ++i) {
         const auto deformed = ScatterToElement(q_eigen, i);
@@ -181,12 +182,12 @@ void Deformable<vertex_dim, element_dim>::PyGetShapeTargetSMatrixFromDeformation
             // S is a 6x1 vector
             // transform a symmetric 3x3 matrix to a 6x1 vector
             auto S_mat = F_auxiliary_[i][j].S(); 
-            S[i * sample_num * 6 + j * 6 + 0] = S_mat(0, 0);
-            S[i * sample_num * 6 + j * 6 + 1] = S_mat(0, 1);
-            S[i * sample_num * 6 + j * 6 + 2] = S_mat(0, 2);
-            S[i * sample_num * 6 + j * 6 + 3] = S_mat(1, 1);
-            S[i * sample_num * 6 + j * 6 + 4] = S_mat(1, 2);
-            S[i * sample_num * 6 + j * 6 + 5] = S_mat(2, 2); 
+            S[i * sample_num * s_vec_dim + j * s_vec_dim + 0] = S_mat(0, 0);
+            S[i * sample_num * s_vec_dim + j * s_vec_dim + 1] = S_mat(0, 1);
+            S[i * sample_num * s_vec_dim + j * s_vec_dim + 2] = S_mat(0, 2);
+            S[i * sample_num * s_vec_dim + j * s_vec_dim + 3] = S_mat(1, 1);
+            S[i * sample_num * s_vec_dim + j * s_vec_dim + 4] = S_mat(1, 2);
+            S[i * sample_num * s_vec_dim + j * s_vec_dim + 5] = S_mat(2, 2);
             // this would be the ideal action for each element
         }
     }
@@ -203,7 +204,34 @@ const real Deformable<vertex_dim, element_dim>::ShapeTargetingEnergy(const Vecto
                             const Eigen::Matrix<real, vertex_dim, vertex_dim>& A) -> real {
         return 0.5 * shape_target_stiffness_ * (F - R * A).squaredNorm();
     };
-    return 0;  
+
+    real total_energy = 0; 
+    const int element_num = mesh_.NumOfElements();
+    const int sample_num = GetNumOfSamplesInElement();
+    std::vector<real> element_energy(element_num, 0);
+
+    #pragma omp parallel for
+    for (int i = 0; i < element_num; ++i) {
+        const auto deformed = ScatterToElement(q, i);
+        for (int j = 0; j < sample_num; ++j) {
+            const auto F = F_auxiliary_[i][j].F();
+            const auto R = F_auxiliary_[i][j].R();
+            // A is 1x6 per sample point, assemble it into a symmetric 3x3 matrix
+            Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat;
+            A_mat(0, 0) = act[i * sample_num * 6 + j * 6 + 0];
+            A_mat(0, 1) = act[i * sample_num * 6 + j * 6 + 1];
+            A_mat(0, 2) = act[i * sample_num * 6 + j * 6 + 2];
+            A_mat(1, 0) = act[i * sample_num * 6 + j * 6 + 1];
+            A_mat(1, 1) = act[i * sample_num * 6 + j * 6 + 3];
+            A_mat(1, 2) = act[i * sample_num * 6 + j * 6 + 4];
+            A_mat(2, 0) = act[i * sample_num * 6 + j * 6 + 2];
+            A_mat(2, 1) = act[i * sample_num * 6 + j * 6 + 4];
+            A_mat(2, 2) = act[i * sample_num * 6 + j * 6 + 5];
+            element_energy[i] += EnergyDensity(F, R, A_mat) * element_volume_ / sample_num;
+        }
+    }
+    for (const auto& e : element_energy) total_energy += e;
+    return total_energy;
 }
 // ShapeTarget Force
 template<int vertex_dim, int element_dim>
@@ -214,7 +242,47 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetingForce(const Ve
         return shape_target_stiffness_ * (F - R * A);
     };
 
-    return VectorXr::Zero(q.size());
+    VectorXr total_force = VectorXr::Zero(q.size());
+    const int element_num = mesh_.NumOfElements();
+    const int sample_num = GetNumOfSamplesInElement();
+    std::vector<Eigen::Matrix<real, vertex_dim, 1>> f_ints(element_num * element_dim,
+        Eigen::Matrix<real, vertex_dim, 1>::Zero());
+    
+    #pragma omp parallel for
+    for (int i = 0; i < element_num; ++i) {
+        const auto deformed = ScatterToElement(q, i);
+        for (int j = 0; j < sample_num; ++j) {
+            const auto F = F_auxiliary_[i][j].F();
+            const auto R = F_auxiliary_[i][j].R();
+            // A is 1x6 per sample point, assemble it into a symmetric 3x3 matrix
+            Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat;
+            A_mat(0, 0) = act[i * sample_num * 6 + j * 6 + 0];
+            A_mat(0, 1) = act[i * sample_num * 6 + j * 6 + 1];
+            A_mat(0, 2) = act[i * sample_num * 6 + j * 6 + 2];
+            A_mat(1, 0) = act[i * sample_num * 6 + j * 6 + 1];
+            A_mat(1, 1) = act[i * sample_num * 6 + j * 6 + 3];
+            A_mat(1, 2) = act[i * sample_num * 6 + j * 6 + 4];
+            A_mat(2, 0) = act[i * sample_num * 6 + j * 6 + 2];
+            A_mat(2, 1) = act[i * sample_num * 6 + j * 6 + 4];
+            A_mat(2, 2) = act[i * sample_num * 6 + j * 6 + 5];
+            
+            Eigen::Matrix<real, vertex_dim, vertex_dim> P = StressTensor(F, R, A_mat);
+            const Eigen::Matrix<real, 1, vertex_dim * element_dim> f_kd =
+                -Flatten(P).transpose() * finite_element_samples_[i][j].dF_dxkd_flattened() * element_volume_ / sample_num;
+            for (int k = 0; k < element_dim; ++k) {
+                f_ints[i * element_dim + k] += Eigen::Matrix<real, vertex_dim, 1>(f_kd.segment(k * vertex_dim, vertex_dim));
+            }
+        }
+    }
+    for (int i = 0; i < element_num; ++i) {
+        const auto vi = mesh_.element(i);
+        for (int j = 0; j < element_dim; ++j) {
+            for (int k = 0; k < vertex_dim; ++k) {
+                total_force(vi(j) * vertex_dim + k) += f_ints[i * element_dim + j](k);
+            }
+        }
+    }
+    return total_force;
 }
 
 
