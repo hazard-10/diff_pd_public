@@ -130,6 +130,12 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
     // 3. original solver takes multiple iterations only to update contact_index, 
     //    the q and v is not updated in the loop. so we only call the solver once
     
+    std::map<int, real> additional_dirichlet; 
+    // Initial guess.
+    const VectorXr q_sol = ShapeTargetNonlinearSolve(q, act, inv_h2m, rhs, additional_dirichlet, options); 
+    q_next = q_sol;  
+    v_next = (q_next - q) / h; 
+    return;
     // update 2/21 
     // just realized that the act matrix is only used as actuation force / energy computation. It is not used otherwise in the PD solver.
     // And this concludes the forward pass. Only modification is the setup of a new energy and update how the accumulated force and energy is computed.
@@ -137,6 +143,150 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
 }
 
 
+template<int vertex_dim, int element_dim>
+const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(const VectorXr& q_init, const VectorXr& act, const real inv_h2m,
+        const VectorXr& rhs, const std::map<int, real>& additional_dirichlet,
+        const std::map<std::string, real>& options) const {
+
+    // 0. Read options, prepare variables
+    // print the first 10 entries of the q_init
+    CheckShapeTargetParam(options);
+    const int max_pd_iter = static_cast<int>(options.at("max_pd_iter"));
+    const int thread_ct = static_cast<int>(options.at("thread_ct"));
+    const real abs_tol = options.at("abs_tol");
+    const real rel_tol = options.at("rel_tol");
+    const int verbose_level = static_cast<int>(options.at("verbose"));
+    const bool use_bfgs = static_cast<bool>(options.at("use_bfgs"));
+    int bfgs_history_size = 0;
+    int max_ls_iter = 0;
+    if (use_bfgs) {
+        bfgs_history_size = static_cast<int>(options.at("bfgs_history_size"));
+        max_ls_iter = static_cast<int>(options.at("max_ls_iter"));
+    }
+    bool use_acc = true;
+    bool use_sparse = false;
+    const std::string method = "pd_eigen";
+
+    std::map<int, real> augmented_dirichlet = dirichlet_;
+    for (const auto& pair : additional_dirichlet)
+        augmented_dirichlet[pair.first] = pair.second;
+
+    // 1. initialize variables
+    VectorXr q_sol = q_init; 
+    // Enforce dirichlet boundary conditions.
+    VectorXr selected = VectorXr::Ones(dofs_);
+    for (const auto& pair : augmented_dirichlet) {
+        q_sol(pair.first) = pair.second;
+        selected(pair.first) = 0;
+    } 
+    ShapeTargetComputeAuxiliaryDeformationGradient(q_sol); // do this every time q_sol is updated
+ 
+    VectorXr force_sol = ShapeTargetingForce(q_sol, act);
+    real energy_sol = ShapeTargetingEnergy(q_sol, act);    
+    auto eval_obj = [&](const VectorXr& q_cur, const real energy_cur) {
+        return 0.5 * (q_cur - rhs).dot(inv_h2m * (q_cur - rhs)) + energy_cur;
+    };
+    real obj_sol = eval_obj(q_sol, energy_sol);
+    VectorXr grad_sol = (inv_h2m * (q_sol - rhs) - force_sol).array() * selected.array();
+    bool success = false;
+    // Initialize queues for BFGS. Better explained in the PDNonlinearSolve function
+    std::deque<VectorXr> si_history, xi_history;
+    std::deque<VectorXr> yi_history, gi_history; 
+    for (int i = 0; i < max_pd_iter; ++i) {
+        if (use_bfgs) {
+            // BFGS's direction: quasi_newton_direction = B * grad_sol.
+            VectorXr quasi_newton_direction = VectorXr::Zero(dofs_); 
+            // Current solution: q_sol.
+            // Current gradient: grad_sol.
+            const int bfgs_size = static_cast<int>(xi_history.size());
+            if (bfgs_size == 0) {
+                // Initially, the queue is empty. We use A as our initial guess of Hessian (not the inverse!).
+                xi_history.push_back(q_sol);
+                gi_history.push_back(grad_sol);
+                quasi_newton_direction = PdLhsSolve(method, grad_sol, additional_dirichlet, use_acc, use_sparse); 
+            } else {
+                const VectorXr q_sol_last = xi_history.back();
+                const VectorXr grad_sol_last = gi_history.back();
+                xi_history.push_back(q_sol);
+                gi_history.push_back(grad_sol);
+                si_history.push_back(q_sol - q_sol_last);
+                yi_history.push_back(grad_sol - grad_sol_last);
+                if (bfgs_size == bfgs_history_size + 1) {
+                    xi_history.pop_front();
+                    gi_history.pop_front();
+                    si_history.pop_front();
+                    yi_history.pop_front();
+                }
+                VectorXr q = grad_sol;
+                std::deque<real> rhoi_history, alphai_history;
+                for (auto sit = si_history.crbegin(), yit = yi_history.crbegin(); sit != si_history.crend(); ++sit, ++yit) {
+                    const VectorXr& yi = *yit;
+                    const VectorXr& si = *sit;
+                    const real rhoi = 1 / yi.dot(si);
+                    const real alphai = rhoi * si.dot(q);
+                    rhoi_history.push_front(rhoi);
+                    alphai_history.push_front(alphai);
+                    q -= alphai * yi;
+                }
+                // H0k = PdLhsSolve(I);
+                VectorXr z = PdLhsSolve(method, q, additional_dirichlet, use_acc, use_sparse);
+                auto sit = si_history.cbegin(), yit = yi_history.cbegin();
+                auto rhoit = rhoi_history.cbegin(), alphait = alphai_history.cbegin();
+                for (; sit != si_history.cend(); ++sit, ++yit, ++rhoit, ++alphait) {
+                    const real rhoi = *rhoit;
+                    const real alphai = *alphait;
+                    const VectorXr& si = *sit;
+                    const VectorXr& yi = *yit;
+                    const real betai = rhoi * yi.dot(z);
+                    z += si * (alphai - betai);
+                }
+                quasi_newton_direction = z;
+            } 
+            if (quasi_newton_direction.dot(grad_sol) <= 0)
+                quasi_newton_direction = grad_sol.array() * selected.array();
+            // Line search --- keep in mind that grad/newton_direction points to the direction that *increases* the objective. 
+            real step_size = 1;
+            VectorXr q_sol_next = q_sol - step_size * quasi_newton_direction; 
+            ShapeTargetComputeAuxiliaryDeformationGradient(q_sol_next);
+            real energy_next = ShapeTargetingEnergy(q_sol_next, act); 
+            real obj_next = eval_obj(q_sol_next, energy_next);
+            const real gamma = ToReal(1e-4);
+            bool ls_success = false;    
+            for (int j = 0; j < max_ls_iter; ++j) {
+                // Directional gradient: obj(q_sol - step_size * newton_direction)
+                //                     = obj_sol - step_size * newton_direction.dot(grad_sol)
+                const real obj_cond = obj_sol - gamma * step_size * grad_sol.dot(quasi_newton_direction);
+                const bool descend_condition = !std::isnan(obj_next) && obj_next < obj_cond + std::numeric_limits<real>::epsilon();
+                if (descend_condition) {
+                    ls_success = true; 
+                    break;
+                }
+                step_size /= 2;
+                q_sol_next = q_sol - step_size * quasi_newton_direction;
+                ShapeTargetComputeAuxiliaryDeformationGradient(q_sol_next); 
+                energy_next = ShapeTargetingEnergy(q_sol_next, act); 
+                obj_next = eval_obj(q_sol_next, energy_next);
+            }
+            // update 
+            q_sol = q_sol_next;  
+            energy_sol = energy_next; 
+            obj_sol = obj_next;
+        } else {
+            // we will skip non-accelerated version. If this is necessary afeter bfgs failed testing, we can add it later.
+        } 
+        force_sol = ShapeTargetingForce(q_sol, act); 
+        grad_sol = (inv_h2m * (q_sol - rhs) - force_sol).array() * selected.array(); 
+        // check convergence
+        const real abs_error = grad_sol.norm();
+        const real rhs_norm = VectorXr(selected.array() * (inv_h2m * rhs).array()).norm(); 
+        if (abs_error <= rel_tol * rhs_norm + abs_tol) {
+            success = true; 
+            return q_sol;
+        } 
+    }
+    CheckError(success, "PD method fails to converge.");
+    return VectorXr::Zero(dofs_);
+}
 
 
 // ------- Below is contains Shape Target Energy related functions -------
@@ -195,7 +345,6 @@ void Deformable<vertex_dim, element_dim>::PyGetShapeTargetSMatrixFromDeformation
 
 // Design choice: pass actuation data everywhere with a 1d vector, 
 // only assemble the matrix before solving
-
 // ShapeTarget Energy. Modified from deformation_actuation.cpp/AcuationEnergy
 template<int vertex_dim, int element_dim>
 const real Deformable<vertex_dim, element_dim>::ShapeTargetingEnergy(const VectorXr& q, const VectorXr& act) const{
@@ -284,6 +433,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetingForce(const Ve
     }
     return total_force;
 }
+
 
 
 

@@ -169,6 +169,10 @@ public:
         const std::map<std::string, real>& options, VectorXr& q_next, VectorXr& v_next) const;
     // Prefactorize the matrix A
     void SetupShapeTargetingSolver(const real dt, const std::map<std::string, real>& options) const;
+    // main forward solver
+    const VectorXr ShapeTargetNonlinearSolve(const VectorXr& q_init, const VectorXr& act, const real inv_h2m,
+        const VectorXr& rhs, const std::map<int, real>& additional_dirichlet,
+        const std::map<std::string, real>& options) const;
     // pre-SVD deformation gradient
     void ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q) const;
     // Compute the energy & force
@@ -177,8 +181,9 @@ public:
 
     // functional for debugging and verification
     void PyGetShapeTargetSMatrixFromDeformation(const std::vector<real>& q, std::vector<real>& S) const;
+    void SetShapeTargetStiffness(const real stiffness) { shape_target_stiffness_ = stiffness; }
 
-    real shape_target_stiffness_ = 0.0;
+    real shape_target_stiffness_ = 344827.586  ; //  used 2 * mu, mu defined in .py same as routingTendon
     
 
 protected:
