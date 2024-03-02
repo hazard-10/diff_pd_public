@@ -135,6 +135,11 @@ def do_shape_targeting(act, q_ideal):
         print("avg diff:", np.mean(diff_q_ideal))
         q_curr = copy.deepcopy(q_next)
         v_curr = copy.deepcopy(v_next)
+        v_curr *= 0.97
+        
+        act = StdRealVector(0)
+        deformable_shapeTarget.PyGetShapeTargetSMatrixFromDeformation(q_ideal, act)
+        act = np.array(act)
     
  
 if __name__ == '__main__':
