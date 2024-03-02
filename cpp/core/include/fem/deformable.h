@@ -161,16 +161,16 @@ public:
 
     // For shape targeting. Energy will be defined solely as functions instead of classes.
     // add new python binding for shape targeting
-    void PyShapeTargetingForward(const std::vector<real>& q, const std::vector<real>& v,
-        const std::vector<real>& act, const real dt, const std::map<std::string, real>& options,
-        std::vector<real>& q_next, std::vector<real>& v_next) const;
+    void PyShapeTargetingForward(const std::vector<real>& q,
+        const std::vector<real>& act, const std::map<std::string, real>& options,
+        std::vector<real>& q_next) const;
     // main forward solver
-    void ShapeTargetingForward(const VectorXr& q, const VectorXr& v, const VectorXr& act, const real dt,
-        const std::map<std::string, real>& options, VectorXr& q_next, VectorXr& v_next) const;
+    void ShapeTargetingForward(const VectorXr& q,  const VectorXr& act,  
+        const std::map<std::string, real>& options, VectorXr& q_next ) const;
     // Prefactorize the matrix A
-    void SetupShapeTargetingSolver(const real dt, const std::map<std::string, real>& options) const;
+    void SetupShapeTargetingSolver( const std::map<std::string, real>& options) const;
     // main forward solver
-    const VectorXr ShapeTargetNonlinearSolve(const VectorXr& q_init, const VectorXr& act, const real inv_h2m,
+    const VectorXr ShapeTargetNonlinearSolve(const VectorXr& q_init, const VectorXr& act, 
         const VectorXr& rhs, const std::map<int, real>& additional_dirichlet,
         const std::map<std::string, real>& options) const;
     // pre-SVD deformation gradient

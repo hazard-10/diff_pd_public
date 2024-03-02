@@ -109,37 +109,26 @@ def do_shape_targeting(act, q_ideal):
     png_file = render_folder / 'starfish_default.png'
 
     q_curr = default_hex_mesh.py_vertices()
-    v_curr = np.zeros(deformable_shapeTarget.dofs())
     
     # get a default render
     deformable_shapeTarget.PySaveToMeshFile(q_curr, render_bin_str)
     render_quasi_starfish(render_bin_str, png_file) 
     
-    import copy
-    num_iter  = 51
-    # do shape targeting
-    for i in range(num_iter):
-        print("iter:", i)
-        deformable_shapeTarget.SetShapeTargetStiffness( mu * 2)
-        q_next, v_next = StdRealVector(dof), StdRealVector(dof)
-        deformable_shapeTarget.PyShapeTargetingForward(q_curr, v_curr, act, dt, options, q_next, v_next) 
-        q_next = np.array(q_next)
-        v_next = np.array(v_next)
-        deformable_shapeTarget.PySaveToMeshFile(q_next, render_bin_str)
-        png_file = render_folder / f'starfish_{obj_num}_shape_target_{i}.png'
-        # every 5 iterations, save a render
-        if i % 5 == 0:
-            render_quasi_starfish(render_bin_str, png_file)
-        print("curr avg speed:", np.mean(v_curr))
-        diff_q_ideal = q_next - q_ideal
-        print("avg diff:", np.mean(diff_q_ideal))
-        q_curr = copy.deepcopy(q_next)
-        v_curr = copy.deepcopy(v_next)
-        v_curr *= 0.97
-        
-        act = StdRealVector(0)
-        deformable_shapeTarget.PyGetShapeTargetSMatrixFromDeformation(q_ideal, act)
-        act = np.array(act)
+    import copy  
+    
+    # found a strong correlation between the stiffness and the convergence of the shape targeting
+    deformable_shapeTarget.SetShapeTargetStiffness( 2000 * mu)
+    q_next, v_next = StdRealVector(dof), StdRealVector(dof)
+    deformable_shapeTarget.PyShapeTargetingForward(q_curr, act, options, q_next ) 
+    q_next = np.array(q_next) 
+    deformable_shapeTarget.PySaveToMeshFile(q_next, render_bin_str)
+    png_file = render_folder / f'starfish_{obj_num}_shape_target_{0}.png'
+    # every 5 iterations, save a render 
+    render_quasi_starfish(render_bin_str, png_file)
+    diff_q_ideal = q_next - q_ideal
+    print("avg diff:", np.mean(diff_q_ideal))
+    q_curr = copy.deepcopy(q_next)
+         
     
  
 if __name__ == '__main__':

@@ -166,13 +166,12 @@ const std::vector<std::vector<real>> Deformable<vertex_dim, element_dim>::PyElas
 }
 
 template<int vertex_dim, int element_dim>
-void Deformable<vertex_dim, element_dim>::PyShapeTargetingForward(const std::vector<real>& q, const std::vector<real>& v,
-    const std::vector<real>& act, const real dt, const std::map<std::string, real>& options,
-    std::vector<real>& q_next, std::vector<real>& v_next) const {
-    VectorXr q_next_eig, v_next_eig;
-    ShapeTargetingForward(ToEigenVector(q), ToEigenVector(v), ToEigenVector(act), dt, options, q_next_eig, v_next_eig);
+void Deformable<vertex_dim, element_dim>::PyShapeTargetingForward(const std::vector<real>& q,
+    const std::vector<real>& act, const std::map<std::string, real>& options,
+    std::vector<real>& q_next ) const {
+    VectorXr q_next_eig;
+    ShapeTargetingForward(ToEigenVector(q), ToEigenVector(act), options, q_next_eig);
     q_next = ToStdVector(q_next_eig);
-    v_next = ToStdVector(v_next_eig);
 }
 
 template<int vertex_dim, int element_dim>
