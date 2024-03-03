@@ -51,7 +51,7 @@ def render_quasi_starfish(mesh_file, png_file):
     renderer.render()
 
 # global parameters
-obj_num = 90
+obj_num = 30
 asset_folder = Path('/mnt/e/muscleCode/sample_muscle_data/starfish')
 default_hex_bin_str = str(asset_folder / 'starfish_demo_voxel.bin')
 gt_folder = Path('/mnt/e/wsl_projects/diff_pd_public/python/example/quasi_starfish/init_ground_truth')
@@ -122,7 +122,7 @@ def do_shape_targeting(act, q_ideal):
     deformable_shapeTarget.PyShapeTargetingForward(q_curr, act, options, q_next ) 
     q_next = np.array(q_next) 
     deformable_shapeTarget.PySaveToMeshFile(q_next, render_bin_str)
-    png_file = render_folder / f'starfish_{obj_num}_shape_target_{0}.png'
+    png_file = render_folder / f'starfish_{obj_num}_shape_target_{obj_num}.png'
     # every 5 iterations, save a render 
     render_quasi_starfish(render_bin_str, png_file)
     diff_q_ideal = q_next - q_ideal
