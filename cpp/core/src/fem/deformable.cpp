@@ -175,6 +175,20 @@ void Deformable<vertex_dim, element_dim>::PyShapeTargetingForward(const std::vec
 }
 
 template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::PyShapeTargetingBackward(const std::vector<real>& q,
+    const std::vector<real>& act, const std::vector<real>& q_next, 
+    const std::vector<real>& dl_dq_next, const std::map<std::string, real>& options,
+    std::vector<real>& dl_dq, std::vector<real>& dl_dact, std::vector<real>& dl_dmat_w, std::vector<real>& dl_dact_w) const {
+    VectorXr dl_dq_eig, dl_dact_eig, dl_dmat_w_eig, dl_dact_w_eig;
+    ShapeTargetingBackward(ToEigenVector(q), ToEigenVector(act), ToEigenVector(q_next), ToEigenVector(dl_dq_next), options,
+        dl_dq_eig, dl_dact_eig, dl_dmat_w_eig, dl_dact_w_eig);
+    dl_dq = ToStdVector(dl_dq_eig);
+    dl_dact = ToStdVector(dl_dact_eig);
+    dl_dmat_w = ToStdVector(dl_dmat_w_eig);
+    dl_dact_w = ToStdVector(dl_dact_w_eig);
+}
+
+template<int vertex_dim, int element_dim>
 const real Deformable<vertex_dim, element_dim>::ElasticEnergy(const VectorXr& q) const {
     if (!material_) return 0;
 

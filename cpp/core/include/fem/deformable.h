@@ -164,7 +164,11 @@ public:
     void PyShapeTargetingForward(const std::vector<real>& q,
         const std::vector<real>& act, const std::map<std::string, real>& options,
         std::vector<real>& q_next) const;
-    // main forward solver
+    void PyShapeTargetingBackward(const std::vector<real>& q, const std::vector<real>& act, const std::vector<real>& q_next,
+        const std::vector<real>& dl_dq_next, const std::map<std::string, real>& options,
+        std::vector<real>& dl_dq, std::vector<real>& dl_dact, 
+        std::vector<real>& dl_dmat_w, std::vector<real>& dl_dact_w) const;
+    // ---forward solver
     void ShapeTargetingForward(const VectorXr& q,  const VectorXr& act,  
         const std::map<std::string, real>& options, VectorXr& q_next ) const;
     // Prefactorize the matrix A
@@ -175,10 +179,17 @@ public:
         const std::map<std::string, real>& options) const;
     // pre-SVD deformation gradient
     void ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q) const;
-    // Compute the energy & force
+    // ---Backward solver
+    void ShapeTargetingBackward(const VectorXr& q, const VectorXr& act, const VectorXr& q_next,
+        const VectorXr& dl_dq_next, const std::map<std::string, real>& options,
+        VectorXr& dl_dq, VectorXr& dl_dact, 
+        VectorXr& dl_dpd_mat_w, VectorXr& dl_dact_w) const;
+    // Compute the energy & force, & differential, used in both forward and backward
     const real ShapeTargetingEnergy(const VectorXr& q, const VectorXr& act) const;
     const VectorXr ShapeTargetingForce(const VectorXr& q, const VectorXr& act) const;
 
+    void ShapeTargetingForceDifferential(const VectorXr& q, const VectorXr& act, SparseMatrixElements& dq, SparseMatrixElements& da,
+        SparseMatrixElements& dw) const;
     // functional for debugging and verification
     void PyGetShapeTargetSMatrixFromDeformation(const std::vector<real>& q, std::vector<real>& S) const;
     void SetShapeTargetStiffness(const real stiffness) { shape_target_stiffness_ = stiffness; }
@@ -263,6 +274,17 @@ private:
         const std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& pd_backward_local_element_matrices,
         const std::vector<std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>>& pd_backward_local_muscle_matrices,
         const VectorXr& dq_cur) const;
+    // function below needs further modification to determine the input type
+    // for shape targeting
+    void SetupShapeTargetingLocalStepDifferential(const VectorXr& q_cur, const VectorXr& a_cur,
+        std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& pd_backward_local_element_matrices,
+        std::vector<std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>>& pd_backward_local_muscle_matrices
+    ) const;
+    const VectorXr ApplyShapeTargetingLocalStepDifferential(const VectorXr& q_cur, const VectorXr& a_cur,
+        const std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& pd_backward_local_element_matrices,
+        const std::vector<std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>>& pd_backward_local_muscle_matrices,
+        const VectorXr& dq_cur) const;
+
     const VectorXr PdLhsMatrixOp(const VectorXr& q, const std::map<int, real>& additional_dirichlet_boundary_condition) const;
 
     // Compute deformation gradient.

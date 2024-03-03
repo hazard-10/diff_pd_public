@@ -89,18 +89,9 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForward(const VectorXr& 
 
     // 0. Read options     
     CheckShapeTargetParam(options);
-    const int max_pd_iter = static_cast<int>(options.at("max_pd_iter"));
     const int thread_ct = static_cast<int>(options.at("thread_ct"));
-    const real abs_tol = options.at("abs_tol");
-    const real rel_tol = options.at("rel_tol");
-    const int verbose_level = static_cast<int>(options.at("verbose"));
-    const bool use_bfgs = static_cast<bool>(options.at("use_bfgs"));
-    int bfgs_history_size = 0;
-    int max_ls_iter = 0;
-    if (use_bfgs) {
-        bfgs_history_size = static_cast<int>(options.at("bfgs_history_size"));
-        max_ls_iter = static_cast<int>(options.at("max_ls_iter"));
-    }
+    // const int verbose_level = static_cast<int>(options.at("verbose"));
+    // re-use verbose when needed
     
     omp_set_num_threads(thread_ct);
 
@@ -135,10 +126,9 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
     // print the first 10 entries of the q_init
     CheckShapeTargetParam(options);
     const int max_pd_iter = static_cast<int>(options.at("max_pd_iter"));
-    const int thread_ct = static_cast<int>(options.at("thread_ct"));
     const real abs_tol = options.at("abs_tol");
     const real rel_tol = options.at("rel_tol");
-    const int verbose_level = static_cast<int>(options.at("verbose"));
+    // const int verbose_level = static_cast<int>(options.at("verbose"));
     const bool use_bfgs = static_cast<bool>(options.at("use_bfgs"));
     int bfgs_history_size = 0;
     int max_ls_iter = 0;
@@ -251,6 +241,9 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
                 energy_next = ShapeTargetingEnergy(q_sol_next, act); 
                 obj_next = eval_obj(q_sol_next, energy_next);
             }
+            if (!ls_success) {                
+                PrintWarning("Line search fails after " + std::to_string(max_ls_iter) + " trials.");
+            }
             // update 
             q_sol = q_sol_next;  
             energy_sol = energy_next; 
@@ -315,7 +308,7 @@ void Deformable<vertex_dim, element_dim>::PyGetShapeTargetSMatrixFromDeformation
             F_auxiliary_[i][j].Initialize(F); // Extract U, V, sig, R, S
             // S is a 6x1 vector
             // transform a symmetric 3x3 matrix to a 6x1 vector
-            auto S_mat = F_auxiliary_[i][j].S(); 
+            const Eigen::Matrix<real, vertex_dim, vertex_dim>& S_mat = F_auxiliary_[i][j].S(); 
             S[i * sample_num * s_vec_dim + j * s_vec_dim + 0] = S_mat(0, 0);
             S[i * sample_num * s_vec_dim + j * s_vec_dim + 1] = S_mat(0, 1);
             S[i * sample_num * s_vec_dim + j * s_vec_dim + 2] = S_mat(0, 2);
@@ -345,7 +338,7 @@ const real Deformable<vertex_dim, element_dim>::ShapeTargetingEnergy(const Vecto
 
     #pragma omp parallel for
     for (int i = 0; i < element_num; ++i) {
-        const auto deformed = ScatterToElement(q, i);
+        // const auto deformed = ScatterToElement(q, i); Not used because we enforce precomputed F_auxiliary_
         for (int j = 0; j < sample_num; ++j) {
             const auto F = F_auxiliary_[i][j].F();
             const auto R = F_auxiliary_[i][j].R();
@@ -383,7 +376,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetingForce(const Ve
     
     #pragma omp parallel for
     for (int i = 0; i < element_num; ++i) {
-        const auto deformed = ScatterToElement(q, i);
+        // const auto deformed = ScatterToElement(q, i);
         for (int j = 0; j < sample_num; ++j) {
             const auto F = F_auxiliary_[i][j].F();
             const auto R = F_auxiliary_[i][j].R();
