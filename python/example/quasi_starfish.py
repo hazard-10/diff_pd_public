@@ -1,7 +1,6 @@
 # First, add a custom function to deformable.h and deformable.cpp that make sure compiles and can modify data
 import sys
 sys.path.append('../')
-sys.path.append('.python/')
 import os
 
 from pathlib import Path
@@ -50,16 +49,11 @@ def render_quasi_starfish(mesh_file, png_file):
     
     renderer.render()
 
-# global parameters
-obj_num = 30
+'''global parameters'''
 asset_folder = Path('/mnt/e/muscleCode/sample_muscle_data/starfish')
 default_hex_bin_str = str(asset_folder / 'starfish_demo_voxel.bin')
 gt_folder = Path('/mnt/e/wsl_projects/diff_pd_public/python/example/quasi_starfish/init_ground_truth')
-gt_json = str(gt_folder)+ '/'+ 'starfish_' + str(obj_num) + '_init_ground_truth.json'
 render_folder = Path('/mnt/e/wsl_projects/diff_pd_public/python/example/quasi_starfish')
-render_bin_path = render_folder / str('starfish_voxel_'+str(obj_num)+'.bin')
-render_bin_str = str(render_bin_path)
-# Deformable param
 youngs_modulus = 5e5
 poissons_ratio = 0.45
 la = youngs_modulus * poissons_ratio / ((1 + poissons_ratio) * (1 - 2 * poissons_ratio))
@@ -81,7 +75,22 @@ options = {
     }
 default_hex_mesh = HexMesh3d()
 default_hex_mesh.Initialize(default_hex_bin_str)  
-def get_idea_q(gt_json):
+deformable_shapeTarget = HexDeformable()
+deformable_shapeTarget.Initialize(default_hex_bin_str, density, 'none', youngs_modulus, poissons_ratio)
+
+'''Functions '''
+def render_deformable(render_id, q_curr):
+    # call save to render bin first before calling this function
+    png_file = render_folder / f'starfish_{render_id}_shape_target.png'
+    render_bin_path = render_folder / f'starfish_{render_id}_shape_target.bin'
+    render_bin_str = str(render_bin_path)
+    deformable_shapeTarget.PySaveToMeshFile(q_curr, render_bin_str)
+    render_quasi_starfish(render_bin_str, png_file) 
+    # remove the render bin file
+    os.remove(render_bin_str)
+    
+def get_idea_q(gt_folder, obj_num):
+    gt_json = str(gt_folder)+ '/'+ 'starfish_' + str(obj_num) + '_init_ground_truth.json'
     # pass whole file into a list
     q_ideal = []
     with open(gt_json, 'r') as f:
@@ -98,40 +107,45 @@ def get_idea_q(gt_json):
     print(int(act.shape[0] // 48) == default_hex_mesh.NumOfElements())
     return act, q_ideal
 
-def do_shape_targeting(act, q_ideal):
-    q_ideal = np.array(q_ideal)
-    deformable_shapeTarget = HexDeformable()
-    deformable_shapeTarget.Initialize(default_hex_bin_str, density, 'none', youngs_modulus, poissons_ratio)
-    deformable_shapeTarget.SetShapeTargetStiffness( 2 * mu)
-    print('deform2 dof:', deformable_shapeTarget.dofs())
+def forward_pass(act, q_curr): 
     dof = deformable_shapeTarget.dofs() 
-
-    png_file = render_folder / 'starfish_default.png'
-
-    q_curr = default_hex_mesh.py_vertices()
-    
-    # get a default render
-    deformable_shapeTarget.PySaveToMeshFile(q_curr, render_bin_str)
-    render_quasi_starfish(render_bin_str, png_file) 
-    
-    import copy  
-    
+    print('deform2 dof:', deformable_shapeTarget.dofs())    
     # found a strong correlation between the stiffness and the convergence of the shape targeting
-    deformable_shapeTarget.SetShapeTargetStiffness( 2000 * mu)
-    q_next, v_next = StdRealVector(dof), StdRealVector(dof)
+    deformable_shapeTarget.SetShapeTargetStiffness( 20 * mu)
+    q_next = StdRealVector(dof)
     deformable_shapeTarget.PyShapeTargetingForward(q_curr, act, options, q_next ) 
-    q_next = np.array(q_next) 
-    deformable_shapeTarget.PySaveToMeshFile(q_next, render_bin_str)
-    png_file = render_folder / f'starfish_{obj_num}_shape_target_{obj_num}.png'
-    # every 5 iterations, save a render 
-    render_quasi_starfish(render_bin_str, png_file)
-    diff_q_ideal = q_next - q_ideal
-    print("avg diff:", np.mean(diff_q_ideal))
-    q_curr = copy.deepcopy(q_next)
-         
+    return q_next
+
+def loss(q_next, q_ideal):
+    l2_diff = np.linalg.norm(q_next - q_ideal)
+    print("l2_diff:", l2_diff)
+    print("l1_diff:", np.mean(np.abs(q_next - q_ideal)))
+    return l2_diff
+
+init_obj_num = 30
+target_obj_num = 30
+
+# initialize local parameters
+act_init_np, _ = get_idea_q(gt_folder, init_obj_num)
+_, q_ideal_std = get_idea_q(gt_folder, target_obj_num)
+q_curr_std = default_hex_mesh.py_vertices() 
+render_deformable('default', q_curr_std)
+q_ideal_np = np.array(q_ideal_std)
+
+# main loop
+num_iter = 1
+for i in range(num_iter):
+    q_next_std = forward_pass(act_init_np, q_curr_std)
+    q_next_np = np.array(q_next_std)
+    render_deformable(i, q_next_np)
+    l2_diff = loss(q_next_np, q_ideal_np)
     
- 
-if __name__ == '__main__':
-    # get_ideal_q
-    act, q_ideal = get_idea_q(gt_json)
-    do_shape_targeting(act, q_ideal)
+    dl_dq_next = StdRealVector(10) # input
+    
+    dl_dq = StdRealVector(10) # output
+    dl_dact = StdRealVector(10) 
+    dl_dmat_w = StdRealVector(10) 
+    dl_dact_w = StdRealVector(10) 
+    deformable_shapeTarget.PyShapeTargetingBackward(q_curr_std, act_init_np, q_next_np, dl_dq_next, options, dl_dq, dl_dact, dl_dmat_w, dl_dact_w)
+    dl_dact_np = np.array(dl_dact)
+    print("dl_dact:", dl_dact_np)
