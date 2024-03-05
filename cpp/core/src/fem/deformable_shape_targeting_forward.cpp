@@ -152,7 +152,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
         q_sol(pair.first) = pair.second;
         selected(pair.first) = 0;
     } 
-    ShapeTargetComputeAuxiliaryDeformationGradient(q_sol); // do this every time q_sol is updated
+    ShapeTargetComputeAuxiliaryDeformationGradient(q_sol, act); // do this every time q_sol is updated
  
     VectorXr force_sol = ShapeTargetingForce(q_sol, act);
     real energy_sol = ShapeTargetingEnergy(q_sol, act);    
@@ -221,7 +221,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
             // Line search --- keep in mind that grad/newton_direction points to the direction that *increases* the objective. 
             real step_size = 1;
             VectorXr q_sol_next = q_sol - step_size * quasi_newton_direction; 
-            ShapeTargetComputeAuxiliaryDeformationGradient(q_sol_next);
+            ShapeTargetComputeAuxiliaryDeformationGradient(q_sol_next, act);
             real energy_next = ShapeTargetingEnergy(q_sol_next, act); 
             real obj_next = eval_obj(q_sol_next, energy_next);
             const real gamma = ToReal(1e-4);
@@ -237,7 +237,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
                 }
                 step_size /= 2;
                 q_sol_next = q_sol - step_size * quasi_newton_direction;
-                ShapeTargetComputeAuxiliaryDeformationGradient(q_sol_next); 
+                ShapeTargetComputeAuxiliaryDeformationGradient(q_sol_next, act); 
                 energy_next = ShapeTargetingEnergy(q_sol_next, act); 
                 obj_next = eval_obj(q_sol_next, energy_next);
             }
@@ -273,7 +273,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
 // Compare to ComputeDeformationGradientAuxiliaryDataAndProjection, we don't need projectToManifold
 // as we are dealing with R * A, not R alone
 template<int vertex_dim, int element_dim>
-void Deformable<vertex_dim, element_dim>::ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q) const{
+void Deformable<vertex_dim, element_dim>::ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q, const VectorXr& act) const{
     // exact same as ComputeDeformationGradientAuxiliaryDataAndProjection
     const int element_num = mesh_.NumOfElements();
     const int sample_num = GetNumOfSamplesInElement();
@@ -283,7 +283,20 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetComputeAuxiliaryDeformation
         const auto deformed = ScatterToElement(q, i);
         F_auxiliary_[i].resize(sample_num);
         for (int j = 0; j < sample_num; ++j) {
-            const auto F = DeformationGradient(i, deformed, j);
+            auto F = DeformationGradient(i, deformed, j);
+            if (use_FA_not_F){
+                Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat;
+                A_mat(0, 0) = act[i * sample_num * 6 + j * 6 + 0];
+                A_mat(0, 1) = act[i * sample_num * 6 + j * 6 + 1];
+                A_mat(0, 2) = act[i * sample_num * 6 + j * 6 + 2];
+                A_mat(1, 0) = act[i * sample_num * 6 + j * 6 + 1];
+                A_mat(1, 1) = act[i * sample_num * 6 + j * 6 + 3];
+                A_mat(1, 2) = act[i * sample_num * 6 + j * 6 + 4];
+                A_mat(2, 0) = act[i * sample_num * 6 + j * 6 + 2];
+                A_mat(2, 1) = act[i * sample_num * 6 + j * 6 + 4];
+                A_mat(2, 2) = act[i * sample_num * 6 + j * 6 + 5];
+                F = F * A_mat;
+            }
             F_auxiliary_[i][j].Initialize(F); // Extract U, V, sig, R, S
         }
     }

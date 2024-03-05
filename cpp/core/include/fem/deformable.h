@@ -178,7 +178,7 @@ public:
         const VectorXr& rhs, const std::map<int, real>& additional_dirichlet,
         const std::map<std::string, real>& options) const;
     // pre-SVD deformation gradient
-    void ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q) const;
+    void ShapeTargetComputeAuxiliaryDeformationGradient(const VectorXr& q, const VectorXr& act) const;
     // ---Backward solver
     void ShapeTargetingBackward(const VectorXr& q, const VectorXr& act, const VectorXr& q_next,
         const VectorXr& dl_dq_next, const std::map<std::string, real>& options,
@@ -195,6 +195,8 @@ public:
     void SetShapeTargetStiffness(const real stiffness) { shape_target_stiffness_ = stiffness; }
 
     real shape_target_stiffness_ = 344827.586  ; //  used 2 * mu, mu defined in .py same as routingTendon
+    bool use_FA_not_F = false; // trial to see if R from RSt should be decomposed from F or from FA
+                               // if true, will conform to the paper
     
 
 protected:

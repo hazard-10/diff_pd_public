@@ -135,9 +135,14 @@ q_ideal_np = np.array(q_ideal_std)
 # main loop
 num_iter = 1
 for i in range(num_iter):
+    time_ = time.time()
     q_next_std = forward_pass(act_init_np, q_curr_std)
+    print("forward pass time:", time.time() - time_)
+    time_ = time.time()
     q_next_np = np.array(q_next_std)
     render_deformable(i, q_next_np)
+    print("forward render time:", time.time() - time_)
+    time_ = time.time()
     l2_diff = loss(q_next_np, q_ideal_np)
     
     dl_dq_next = StdRealVector(10) # input
@@ -147,5 +152,6 @@ for i in range(num_iter):
     dl_dmat_w = StdRealVector(10) 
     dl_dact_w = StdRealVector(10) 
     deformable_shapeTarget.PyShapeTargetingBackward(q_curr_std, act_init_np, q_next_np, dl_dq_next, options, dl_dq, dl_dact, dl_dmat_w, dl_dact_w)
+    print("backward pass time:", time.time() - time_)
     dl_dact_np = np.array(dl_dact)
     print("dl_dact:", dl_dact_np)
