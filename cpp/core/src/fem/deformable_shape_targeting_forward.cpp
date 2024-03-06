@@ -249,7 +249,8 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
             energy_sol = energy_next; 
             obj_sol = obj_next;
         } else {
-            // we will skip non-accelerated version. If this is necessary afeter bfgs failed testing, we can add it later.
+            // we will skip non-accelerated version. If this is necessary after bfgs failed testing, we can add it later.
+            CheckError(true, "Non-BFGS version is not implemented in Shape Targeting forward pass.");
         } 
         force_sol = ShapeTargetingForce(q_sol, act); 
         grad_sol = -1 * force_sol.array() * selected.array(); 
@@ -261,7 +262,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
             return q_sol;
         } 
     }
-    CheckError(success, "PD method fails to converge.");
+    CheckError(success, "PD method fails to converge in Shape target foward.");
     return VectorXr::Zero(dofs_);
 }
 

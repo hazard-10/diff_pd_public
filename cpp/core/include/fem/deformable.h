@@ -188,15 +188,14 @@ public:
     const real ShapeTargetingEnergy(const VectorXr& q, const VectorXr& act) const;
     const VectorXr ShapeTargetingForce(const VectorXr& q, const VectorXr& act) const;
 
-    void ShapeTargetingForceDifferential(const VectorXr& q, const VectorXr& act, SparseMatrixElements& dq, SparseMatrixElements& da,
-        SparseMatrixElements& dw) const;
+    void ShapeTargetingForceDifferential(const VectorXr& q_next, const VectorXr& act, const VectorXr& Z, VectorXr& dl_dact) const;
     // functional for debugging and verification
     void PyGetShapeTargetSMatrixFromDeformation(const std::vector<real>& q, std::vector<real>& S) const;
     void SetShapeTargetStiffness(const real stiffness) { shape_target_stiffness_ = stiffness; }
 
     real shape_target_stiffness_ = 344827.586  ; //  used 2 * mu, mu defined in .py same as routingTendon
-    bool use_FA_not_F = false; // trial to see if R from RSt should be decomposed from F or from FA
-                               // if true, will conform to the paper
+    bool use_FA_not_F = true; // trial to see if R from RSt should be decomposed from F or from FA
+                               // if true, will conform to the original paper Implicit Neural Representation..
     
 
 protected:
@@ -278,14 +277,11 @@ private:
         const VectorXr& dq_cur) const;
     // function below needs further modification to determine the input type
     // for shape targeting
-    void SetupShapeTargetingLocalStepDifferential(const VectorXr& q_cur, const VectorXr& a_cur,
-        std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& pd_backward_local_element_matrices,
-        std::vector<std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>>& pd_backward_local_muscle_matrices
+    void SetupShapeTargetingLocalStepDifferential(const VectorXr& q_cur, const VectorXr& act,
+        std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& dA
     ) const;
-    const VectorXr ApplyShapeTargetingLocalStepDifferential(const VectorXr& q_cur, const VectorXr& a_cur,
-        const std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& pd_backward_local_element_matrices,
-        const std::vector<std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>>& pd_backward_local_muscle_matrices,
-        const VectorXr& dq_cur) const;
+    const VectorXr ApplyShapeTargetingLocalStepDifferential(const VectorXr& q_cur, const VectorXr& act,
+        const std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& dA, const VectorXr& Z) const;
 
     const VectorXr PdLhsMatrixOp(const VectorXr& q, const std::map<int, real>& additional_dirichlet_boundary_condition) const;
 
