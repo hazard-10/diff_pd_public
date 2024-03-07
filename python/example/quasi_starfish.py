@@ -63,11 +63,11 @@ density = 1e3
 thread_ct = 20
 dt = 1e-2    
 options = {
-        'max_pd_iter': 1000,
+        'max_pd_iter': 100,
         'thread_ct': 20,
         'abs_tol': 1e-6,
         'rel_tol': 1e-6,
-        'verbose': 0,
+        'verbose': 2,
         'use_bfgs': 1,
         'bfgs_history_size': 10,
         'max_ls_iter': 10,
@@ -111,16 +111,17 @@ def forward_pass(act, q_curr):
     dof = deformable_shapeTarget.dofs() 
     print('deform2 dof:', deformable_shapeTarget.dofs())    
     # found a strong correlation between the stiffness and the convergence of the shape targeting
-    deformable_shapeTarget.SetShapeTargetStiffness( 20 * mu)
     q_next = StdRealVector(dof)
     deformable_shapeTarget.PyShapeTargetingForward(q_curr, act, options, q_next ) 
     return q_next
 
 def loss(q_next, q_ideal):
-    l2_diff = np.linalg.norm(q_next - q_ideal)
-    print("l2_diff:", l2_diff)
-    print("l1_diff:", np.mean(np.abs(q_next - q_ideal)))
-    return l2_diff
+    l2_loss = np.sum((q_next - q_ideal) ** 2)
+    l1_loss = np.sum(np.abs(q_next - q_ideal))
+    print("l2_loss:", l2_loss)
+    print("l1_diff:", l1_loss)
+    print("mean diff:", np.mean(np.abs(q_next - q_ideal)))
+    return l1_loss
 
 init_obj_num = 30
 target_obj_num = 30
@@ -132,6 +133,7 @@ q_curr_std = default_hex_mesh.py_vertices()
 render_deformable('default', q_curr_std)
 q_ideal_np = np.array(q_ideal_std)
 
+deformable_shapeTarget.SetShapeTargetStiffness(.01)
 # main loop
 num_iter = 1
 for i in range(num_iter):
@@ -143,9 +145,11 @@ for i in range(num_iter):
     render_deformable(i, q_next_np)
     print("forward render time:", time.time() - time_)
     time_ = time.time()
-    l2_diff = loss(q_next_np, q_ideal_np)
+    loss_ = loss(q_next_np, q_ideal_np)
     
-    dl_dq_next = StdRealVector(10) # input
+    # l2 loss gradient
+    dl_dq_next = 2 * (q_next_np - q_ideal_np)
+    # dl_dq_next = np.sign(q_next_np - q_ideal_np)
     
     dl_dq = StdRealVector(10) # output
     dl_dact = StdRealVector(10) 
