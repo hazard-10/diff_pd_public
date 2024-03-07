@@ -121,11 +121,11 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     const real rel_tol = options.at("rel_tol");
     const int verbose_level = static_cast<int>(options.at("verbose"));
     const int thread_ct = static_cast<int>(options.at("thread_ct"));
-    // const bool use_bfgs = static_cast<bool>(options.at("use_bfgs"));
+    bool use_bfgs = static_cast<bool>(options.at("use_bfgs"));
     int bfgs_history_size = static_cast<int>(options.at("bfgs_history_size"));
     int max_ls_iter = static_cast<int>(options.at("max_ls_iter"));
     const std::string method = "pd_eigen";
-    bool use_acc = true;
+    bool use_acc = false;
     bool use_sparse = false;
 
     omp_set_num_threads(thread_ct);
@@ -163,114 +163,130 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     VectorXr hessian_q_Z = PdLhsMatrixOp(Z, additional_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
     VectorXr grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();
     real obj_sol = 0.5 * Z.dot(hessian_q_Z) - dl_dq_next_agg.dot(Z);
-    bool success = true;
+    bool success = false;
     // Initialize queues for BFGS.
     std::deque<VectorXr> si_history, xi_history;
     std::deque<VectorXr> yi_history, gi_history;
+    use_bfgs = false; // disable bfgs for now
     for (int i = 0; i < max_pd_iter; ++i) {
         if (verbose_level > 0) PrintInfo("PD backward iteration: " + std::to_string(i));
-        // use bfgs
-        VectorXr quasi_newton_direction = VectorXr::Zero(dofs_);
-        const int bfgs_size = static_cast<int>(xi_history.size());
-        if (bfgs_size == 0) {
-            // Initially, the queue is empty. We use A as our initial guess of Hessian (not the inverse!).
-            xi_history.push_back(Z);
-            gi_history.push_back(grad_sol);
-            quasi_newton_direction = PdLhsSolve(method, grad_sol, additional_dirichlet, use_acc, use_sparse);
-        } else {
-            const VectorXr Z_last = xi_history.back();
-            const VectorXr grad_last = gi_history.back();
-            xi_history.push_back(Z);
-            gi_history.push_back(grad_sol);
-            si_history.push_back(Z - Z_last);
-            yi_history.push_back(grad_sol - grad_last);
-            if (bfgs_size == bfgs_history_size + 1) {
-                xi_history.pop_front();
-                gi_history.pop_front();
-                si_history.pop_front();
-                yi_history.pop_front();
+        if (use_bfgs){
+            VectorXr quasi_newton_direction = VectorXr::Zero(dofs_);
+            const int bfgs_size = static_cast<int>(xi_history.size());
+            if (bfgs_size == 0) {
+                // Initially, the queue is empty. We use A as our initial guess of Hessian (not the inverse!).
+                xi_history.push_back(Z);
+                gi_history.push_back(grad_sol);
+                quasi_newton_direction = PdLhsSolve(method, grad_sol, additional_dirichlet, use_acc, use_sparse);
+            } else {
+                const VectorXr Z_last = xi_history.back();
+                const VectorXr grad_last = gi_history.back();
+                xi_history.push_back(Z);
+                gi_history.push_back(grad_sol);
+                si_history.push_back(Z - Z_last);
+                yi_history.push_back(grad_sol - grad_last);
+                if (bfgs_size == bfgs_history_size + 1) {
+                    xi_history.pop_front();
+                    gi_history.pop_front();
+                    si_history.pop_front();
+                    yi_history.pop_front();
+                }
+                VectorXr bfgs_q = grad_sol;
+                std::deque<real> rhoi_history, alphai_history;
+                for (auto sit = si_history.crbegin(), yit = yi_history.crbegin(); sit != si_history.crend(); ++sit, ++yit) {
+                    const VectorXr& yi = *yit;
+                    const VectorXr& si = *sit;
+                    const real rhoi = 1 / yi.dot(si);
+                    const real alphai = rhoi * si.dot(bfgs_q);
+                    rhoi_history.push_front(rhoi);
+                    alphai_history.push_front(alphai);
+                    bfgs_q -= alphai * yi;
+                }
+                VectorXr z_ = PdLhsSolve(method, bfgs_q, additional_dirichlet, use_acc, use_sparse);
+                auto sit = si_history.cbegin(), yit = yi_history.cbegin();
+                auto rhoit = rhoi_history.cbegin(), alphait = alphai_history.cbegin();
+                for (; sit != si_history.cend(); ++sit, ++yit, ++rhoit, ++alphait) {
+                    const real rhoi = *rhoit;
+                    const real alphai = *alphait;
+                    const VectorXr& si = *sit;
+                    const VectorXr& yi = *yit;
+                    const real betai = rhoi * yi.dot(z_);
+                    z_ += si * (alphai - betai);
+                }
+                quasi_newton_direction = z_;
             }
-            VectorXr bfgs_q = grad_sol;
-            std::deque<real> rhoi_history, alphai_history;
-            for (auto sit = si_history.crbegin(), yit = yi_history.crbegin(); sit != si_history.crend(); ++sit, ++yit) {
-                const VectorXr& yi = *yit;
-                const VectorXr& si = *sit;
-                const real rhoi = 1 / yi.dot(si);
-                const real alphai = rhoi * si.dot(bfgs_q);
-                rhoi_history.push_front(rhoi);
-                alphai_history.push_front(alphai);
-                bfgs_q -= alphai * yi;
-            }
-            VectorXr z_ = PdLhsSolve(method, bfgs_q, additional_dirichlet, use_acc, use_sparse);
-            auto sit = si_history.cbegin(), yit = yi_history.cbegin();
-            auto rhoit = rhoi_history.cbegin(), alphait = alphai_history.cbegin();
-            for (; sit != si_history.cend(); ++sit, ++yit, ++rhoit, ++alphait) {
-                const real rhoi = *rhoit;
-                const real alphai = *alphait;
-                const VectorXr& si = *sit;
-                const VectorXr& yi = *yit;
-                const real betai = rhoi * yi.dot(z_);
-                z_ += si * (alphai - betai);
-            }
-            quasi_newton_direction = z_;
-        }
-        quasi_newton_direction = quasi_newton_direction.array() * selected.array();
-        if (quasi_newton_direction.dot(grad_sol) < -ToReal(1e-4)) { // TODO: replace 1e-4 with a relative threshold.
-            // This implies the (inverse of) Hessian is indefinite, which means the objective to be minimized will
-            // become unbounded below. In this case, we choose to switch back to Newton's method.
-            success = false;
-            PrintWarning("Indefinite Hessian. BFGS is minimizing an unbounded objective.");
-            // break;
-            // Modified. Don't break yet, print info then do line search
-            if (verbose_level > 0){
-                std::cout << "dot product of q and g:" << quasi_newton_direction.dot(grad_sol) << std::endl;
-            }
-            break;
-        }
-        // Line search.
-        real step_size = 1;
-        VectorXr Z_next = Z - step_size * quasi_newton_direction;
-        VectorXr hessian_q_Z_next = PdLhsMatrixOp(Z_next, additional_dirichlet) - 
-                            ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z_next);
-        VectorXr grad_sol_next = (hessian_q_Z_next - dl_dq_next_agg).array() * selected.array();
-        real obj_next = 0.5 * Z_next.dot(hessian_q_Z_next) - dl_dq_next_agg.dot(Z_next);
-        const real gamma = 1e-4;
-        bool ls_success = false;
-        for (int j = 0; j < max_ls_iter; ++j) {
-            const real obj_cond = obj_sol + gamma * step_size * grad_sol.dot(quasi_newton_direction);
-            const bool descend_condition = !std::isnan(obj_next) && obj_next < obj_cond + std::numeric_limits<real>::epsilon();
-            if (descend_condition) {
-                ls_success = true;
+            quasi_newton_direction = quasi_newton_direction.array() * selected.array();
+            if (quasi_newton_direction.dot(grad_sol) < -ToReal(1e-4)) { // TODO: replace 1e-4 with a relative threshold.
+                // This implies the (inverse of) Hessian is indefinite, which means the objective to be minimized will
+                // become unbounded below. In this case, we choose to switch back to Newton's method.
+                success = false;
+                PrintWarning("Indefinite Hessian. BFGS is minimizing an unbounded objective.");
+                // break;
+                // Modified. Don't break yet, print info then do line search
+                if (verbose_level > 0){
+                    std::cout << "dot product of q and g:" << quasi_newton_direction.dot(grad_sol) << std::endl;
+                }
                 break;
             }
-            step_size *= 0.5;
-            Z_next = Z - step_size * quasi_newton_direction;
-            hessian_q_Z_next = PdLhsMatrixOp(Z_next, additional_dirichlet) - 
-                            ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z_next);
-            grad_sol_next = (hessian_q_Z_next - dl_dq_next_agg).array() * selected.array();
-            obj_next = 0.5 * Z_next.dot(hessian_q_Z_next) - dl_dq_next_agg.dot(Z_next);
-            if (verbose_level > 0) PrintInfo("Line search iteration: " + std::to_string(j));
-            if (verbose_level > 1) {
-                std::cout << "step size: " << step_size << std::endl;
-                std::cout << "obj_sol: " << obj_sol << ", "
-                    << "obj_cond: " << obj_cond << ", "
-                    << "obj_next: " << obj_next << ", "
-                    << "obj_cond - obj_sol: " << obj_cond - obj_sol << ", "
-                    << "obj_next - obj_sol: " << obj_next - obj_sol << std::endl;
+            // Line search.
+            real step_size = 1;
+            VectorXr Z_next = Z - step_size * quasi_newton_direction;
+            VectorXr hessian_q_Z_next = PdLhsMatrixOp(Z_next, additional_dirichlet) - 
+                                ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z_next);
+            VectorXr grad_sol_next = (hessian_q_Z_next - dl_dq_next_agg).array() * selected.array();
+            real obj_next = 0.5 * Z_next.dot(hessian_q_Z_next) - dl_dq_next_agg.dot(Z_next);
+            const real gamma = 1e-4;
+            bool ls_success = false;
+            for (int j = 0; j < max_ls_iter; ++j) {
+                const real obj_cond = obj_sol + gamma * step_size * grad_sol.dot(quasi_newton_direction);
+                const bool descend_condition = !std::isnan(obj_next) && obj_next < obj_cond + std::numeric_limits<real>::epsilon();
+                if (descend_condition) {
+                    ls_success = true;
+                    break;
+                }
+                step_size *= 0.5;
+                Z_next = Z - step_size * quasi_newton_direction;
+                hessian_q_Z_next = PdLhsMatrixOp(Z_next, additional_dirichlet) - 
+                                ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z_next);
+                grad_sol_next = (hessian_q_Z_next - dl_dq_next_agg).array() * selected.array();
+                obj_next = 0.5 * Z_next.dot(hessian_q_Z_next) - dl_dq_next_agg.dot(Z_next);
+                if (verbose_level > 0) PrintInfo("Line search iteration: " + std::to_string(j));
+                if (verbose_level > 1) {
+                    std::cout << "step size: " << step_size << std::endl;
+                    std::cout << "obj_sol: " << obj_sol << ", "
+                        << "obj_cond: " << obj_cond << ", "
+                        << "obj_next: " << obj_next << ", "
+                        << "obj_cond - obj_sol: " << obj_cond - obj_sol << ", "
+                        << "obj_next - obj_sol: " << obj_next - obj_sol << std::endl;
+                }
             }
+            if (!ls_success) {
+                PrintWarning("Line search fails after " + std::to_string(max_ls_iter) + " trials.");
+            }
+            // update
+            Z = Z_next;
+            hessian_q_Z = hessian_q_Z_next;
+            grad_sol = grad_sol_next;
+            obj_sol = obj_next;
+        }else{
+            // conventional pd backward 
+            // Local step:
+            const VectorXr pd_rhs = (dl_dq_next_agg + ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z)).array() * selected.array();
+            // Global step:
+            Z = (PdLhsSolve(method, pd_rhs, additional_dirichlet, use_acc, use_sparse).array() * selected.array());
+            hessian_q_Z = PdLhsMatrixOp(Z, additional_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
+            grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();
+            obj_sol = 0.5 * Z.dot(hessian_q_Z) - dl_dq_next_agg.dot(Z);
         }
-        if (!ls_success) {
-            PrintWarning("Line search fails after " + std::to_string(max_ls_iter) + " trials.");
-        }
-        // update
-        Z = Z_next;
-        hessian_q_Z = hessian_q_Z_next;
-        grad_sol = grad_sol_next;
-        obj_sol = obj_next;
         // check convergence
         const real abs_error = grad_sol.norm();
         const real rhs_norm = dl_dq_next_agg.norm();
-        if (verbose_level > 1) std::cout << "abs_error = " << abs_error << ", rel_tol * rhs_norm = " << rel_tol * rhs_norm << std::endl;
+        if (verbose_level > 1){ 
+            std::cout << "obj_sol = " << obj_sol 
+                      << ", abs_error = " << abs_error 
+                      << ", rhs_norm = " << rhs_norm
+                      << ", rel_tol * rhs_norm + abs_tol = " << rel_tol * rhs_norm + abs_tol << std::endl;
+        }
         if (abs_error <= rel_tol * rhs_norm + abs_tol) {
             success = true;
             for (const auto& pair : augmented_dirichlet) Z(pair.first) = dl_dq_next_agg(pair.first);
@@ -296,6 +312,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     ShapeTargetingForceDifferential(q_next, act, dl_drhs, dl_dact); // perform Z*dForce_dAct
     // dl_dact is the only output we need
 }
+
 template<int vertex_dim, int element_dim>
 void Deformable<vertex_dim, element_dim>::ShapeTargetingForceDifferential(const VectorXr& q_next, 
             const VectorXr& act, const VectorXr& Z, VectorXr& dl_dact) const {
