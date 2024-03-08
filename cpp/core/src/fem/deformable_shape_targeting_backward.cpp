@@ -41,10 +41,6 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingLocalStepDifferenti
     const int sample_num = GetNumOfSamplesInElement();
     const int element_num = mesh_.NumOfElements();
     const real w = shape_target_stiffness_ * element_volume_ / sample_num;
-    
-    Eigen::Matrix<real, vertex_dim * vertex_dim, 1> dF;
-    dF.setZero();
-    for (int i = 0; i < vertex_dim * vertex_dim; ++i) dF(i) = 1;
     // From paper Implicit Neural Representation for Physics-driven Actuated Soft Bodies, eq 14
     // dA = w * Gc.T * A * dR_dq. 
     // if use_FA_not_F, then dA = w * Gc.T * act * Hess_rot_AF * act * Gc
@@ -63,6 +59,29 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingLocalStepDifferenti
         return A_mat;
     };
 
+    auto rotationGradiant = [&](const DeformationGradientAuxiliaryData<vertex_dim>& F){
+        const Eigen::Matrix<real, vertex_dim, 1>& sig = F.sig();
+
+        real lambda0 = 2 / (sig(0) + sig(1));
+        real lambda1 = 2 / (sig(0) + sig(2));
+        real lambda2 = 2 / (sig(1) + sig(2));
+
+        Eigen::Matrix<real, vertex_dim, vertex_dim> q_0 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, -1, 0, 1, 0, 0, 0, 0, 0).finished();
+        Eigen::Matrix<real, vertex_dim, vertex_dim> q_1 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, 0, 0, 0, 0, 1, 0, -1, 0).finished();
+        Eigen::Matrix<real, vertex_dim, vertex_dim> q_2 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, 0, 1, 0, 0, 0, -1, 0, 0).finished();
+        Eigen::Matrix<real, vertex_dim, vertex_dim> Q0 = (1/sqrt(2)) * F.U() * q_0 * F.V().transpose();
+        Eigen::Matrix<real, vertex_dim, vertex_dim> Q1 = (1/sqrt(2)) * F.U() * q_1 * F.V().transpose();
+        Eigen::Matrix<real, vertex_dim, vertex_dim> Q2 = (1/sqrt(2)) * F.U() * q_2 * F.V().transpose();
+
+        Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ0 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q0.data(), vertex_dim*vertex_dim, 1);
+        Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ1 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q1.data(), vertex_dim*vertex_dim, 1);
+        Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ2 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q2.data(), vertex_dim*vertex_dim, 1);
+        Eigen::Matrix<real, vertex_dim*vertex_dim, vertex_dim*vertex_dim> dR_dF = (lambda0 * vecQ0 * vecQ0.transpose() + 
+                                            lambda1 * vecQ1 * vecQ1.transpose() + 
+                                            lambda2 * vecQ2 * vecQ2.transpose());
+        return dR_dF;
+    };
+
     dA.resize(element_num);
     #pragma omp parallel for
     for (int i = 0; i < element_num; i++) {
@@ -76,16 +95,12 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingLocalStepDifferenti
             A_expand.block(6, 6, vertex_dim, vertex_dim).noalias() = A_mat;
 
             DeformationGradientAuxiliaryData<vertex_dim>& F_curr = F_auxiliary_[i][j];
-            // Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F_curr.F(), F_curr.R(), F_curr.S());
-            Eigen::Matrix<real, vertex_dim , vertex_dim  > dR_dF = dRFromdF(F_curr.F(), F_curr.R(), F_curr.S(),  Eigen::Map<const Eigen::Matrix<real, vertex_dim, vertex_dim>>(dF.data(), vertex_dim, vertex_dim));
-            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF_expand; dR_dF_expand.setZero();
-            dR_dF_expand.block(0, 0, vertex_dim, vertex_dim).noalias() = dR_dF;
-            dR_dF_expand.block(3, 3, vertex_dim, vertex_dim).noalias() = dR_dF;
-            dR_dF_expand.block(6, 6, vertex_dim, vertex_dim).noalias() = dR_dF;
+            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = rotationGradiant(F_curr);
             if (use_FA_not_F) {
-                w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF_expand * A_expand * finite_element_samples_[i][j].pd_A();
+                w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF * A_expand * finite_element_samples_[i][j].pd_A();
             }else{
-                w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF_expand * finite_element_samples_[i][j].pd_A();
+                w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF * finite_element_samples_[i][j].pd_A();
+                // since we use F not AF
             }
         }
         dA[i] = w_GT_A_HrAF_A_G;
@@ -175,7 +190,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     // Initialize queues for BFGS.
     std::deque<VectorXr> si_history, xi_history;
     std::deque<VectorXr> yi_history, gi_history;
-    use_bfgs = false; // disable bfgs for now
+    use_bfgs = true; // disable bfgs for now
     for (int i = 0; i < max_pd_iter; ++i) {
         if (verbose_level > 0) PrintInfo("PD backward iteration: " + std::to_string(i));
         if (use_bfgs){

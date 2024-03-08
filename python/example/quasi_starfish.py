@@ -63,7 +63,7 @@ density = 1e3
 thread_ct = 20
 dt = 1e-2    
 options = {
-        'max_pd_iter': 100,
+        'max_pd_iter': 500,
         'thread_ct': 20,
         'abs_tol': 1e-6,
         'rel_tol': 1e-6,
@@ -104,7 +104,7 @@ def get_idea_q(gt_folder, obj_num):
     act = StdRealVector(0)
     deformable_default.PyGetShapeTargetSMatrixFromDeformation(q_ideal, act)
     act = np.array(act)
-    print(int(act.shape[0] // 48) == default_hex_mesh.NumOfElements())
+    print('actuation initialization size check: ', int(act.shape[0] // 48) == default_hex_mesh.NumOfElements()) # 6 per sample, 8 sample per element
     return act, q_ideal
 
 def forward_pass(act, q_curr): 
@@ -146,7 +146,7 @@ for i in range(num_iter):
     print("forward render time:", time.time() - time_)
     time_ = time.time()
     loss_ = loss(q_next_np, q_ideal_np)
-    
+    break    
     # l2 loss gradient
     dl_dq_next = 2 * (q_next_np - q_ideal_np)
     # dl_dq_next = np.sign(q_next_np - q_ideal_np)

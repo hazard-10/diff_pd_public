@@ -39,9 +39,12 @@ if __name__ == '__main__':
     thread_ct = cpu_cnt - 1
     print_info('Detected {:d} CPUs. Using {} of them in this example'.format(cpu_cnt, thread_ct)) 
     newton_opt = { 'max_newton_iter': 500, 'max_ls_iter': 10, 'abs_tol': 1e-9, 'rel_tol': 1e-4, 'verbose': 0, 'thread_ct': thread_ct }
-    pd_opt = { 'max_pd_iter': 500, 'max_ls_iter': 10, 'abs_tol': 1e-9, 'rel_tol': 1e-4, 'verbose': 0, 'thread_ct': thread_ct,
+    pd_opt_forward = { 'max_pd_iter': 500, 'max_ls_iter': 10, 'abs_tol': 1e-9, 'rel_tol': 1e-4, 'verbose': 0, 'thread_ct': thread_ct,
         'use_bfgs': 1, 'bfgs_history_size': 10 }
+    pd_opt_backward = { 'max_pd_iter': 500, 'max_ls_iter': 10, 'abs_tol': 1e-9, 'rel_tol': 1e-4, 'verbose': 0, 'thread_ct': thread_ct,
+        'use_bfgs': 0, 'bfgs_history_size': 10 }
     methods = ('pd_eigen', 'newton_pcg', 'newton_cholesky')
+    pd_opt = (pd_opt_forward, pd_opt_backward)
     opts = (pd_opt, newton_opt, newton_opt)
 
     dt = 1e-2
