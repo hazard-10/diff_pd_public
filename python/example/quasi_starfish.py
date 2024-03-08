@@ -62,13 +62,24 @@ mu = youngs_modulus / (2 * (1 + poissons_ratio))
 density = 1e3
 thread_ct = 20
 dt = 1e-2    
-options = {
+fw_options = {
         'max_pd_iter': 500,
         'thread_ct': 20,
         'abs_tol': 1e-6,
         'rel_tol': 1e-6,
         'verbose': 2,
         'use_bfgs': 1,
+        'bfgs_history_size': 10,
+        'max_ls_iter': 10,
+        
+    }
+bw_options = {
+        'max_pd_iter': 500,
+        'thread_ct': 20,
+        'abs_tol': 1e-6,
+        'rel_tol': 1e-6,
+        'verbose': 2,
+        'use_bfgs': 0,
         'bfgs_history_size': 10,
         'max_ls_iter': 10,
         
@@ -112,7 +123,7 @@ def forward_pass(act, q_curr):
     print('deform2 dof:', deformable_shapeTarget.dofs())    
     # found a strong correlation between the stiffness and the convergence of the shape targeting
     q_next = StdRealVector(dof)
-    deformable_shapeTarget.PyShapeTargetingForward(q_curr, act, options, q_next ) 
+    deformable_shapeTarget.PyShapeTargetingForward(q_curr, act, fw_options, q_next ) 
     return q_next
 
 def loss(q_next, q_ideal):
@@ -133,7 +144,7 @@ q_curr_std = default_hex_mesh.py_vertices()
 render_deformable('default', q_curr_std)
 q_ideal_np = np.array(q_ideal_std)
 
-deformable_shapeTarget.SetShapeTargetStiffness(.01)
+deformable_shapeTarget.SetShapeTargetStiffness(20 * mu)
 # main loop
 num_iter = 1
 for i in range(num_iter):
@@ -146,7 +157,7 @@ for i in range(num_iter):
     print("forward render time:", time.time() - time_)
     time_ = time.time()
     loss_ = loss(q_next_np, q_ideal_np)
-    break    
+    # break    
     # l2 loss gradient
     dl_dq_next = 2 * (q_next_np - q_ideal_np)
     # dl_dq_next = np.sign(q_next_np - q_ideal_np)
@@ -155,7 +166,7 @@ for i in range(num_iter):
     dl_dact = StdRealVector(10) 
     dl_dmat_w = StdRealVector(10) 
     dl_dact_w = StdRealVector(10) 
-    deformable_shapeTarget.PyShapeTargetingBackward(q_curr_std, act_init_np, q_next_np, dl_dq_next, options, dl_dq, dl_dact, dl_dmat_w, dl_dact_w)
+    deformable_shapeTarget.PyShapeTargetingBackward(q_curr_std, act_init_np, q_next_np, dl_dq_next, bw_options, dl_dq, dl_dact, dl_dmat_w, dl_dact_w)
     print("backward pass time:", time.time() - time_)
     dl_dact_np = np.array(dl_dact)
     print("dl_dact:", dl_dact_np)

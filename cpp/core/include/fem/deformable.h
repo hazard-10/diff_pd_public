@@ -194,8 +194,6 @@ public:
     void SetShapeTargetStiffness(const real stiffness) { shape_target_stiffness_ = stiffness; }
 
     real shape_target_stiffness_ = 344827.586  ; //  used 2 * mu, mu defined in .py same as routingTendon
-    bool use_FA_not_F = true; // trial to see if R from RSt should be decomposed from F or from FA
-                               // if true, will conform to the original paper Implicit Neural Representation..
     
 
 protected:

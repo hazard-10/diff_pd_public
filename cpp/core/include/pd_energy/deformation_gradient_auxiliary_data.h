@@ -10,12 +10,22 @@ public:
     ~DeformationGradientAuxiliaryData() {}
 
     void Initialize(const Eigen::Matrix<real, dim, dim>& F);
+    void Initialize(const Eigen::Matrix<real, dim, dim>& F, const Eigen::Matrix<real, dim, dim>& A);
     const Eigen::Matrix<real, dim, dim>& F() const { return F_; }
     const Eigen::Matrix<real, dim, dim>& U() const { return U_; }
     const Eigen::Matrix<real, dim, dim>& V() const { return V_; }
     const Eigen::Matrix<real, dim, 1>& sig() const { return sig_; }
     const Eigen::Matrix<real, dim, dim>& R() const { return R_; }
     const Eigen::Matrix<real, dim, dim>& S() const { return S_; }
+
+    // add shape target act
+    const Eigen::Matrix<real, dim, dim>& A() const { return A_; }
+    const Eigen::Matrix<real, dim, dim>& Fst() const { return Fst_; }
+    const Eigen::Matrix<real, dim, dim>& Rst() const { return Rst_; }
+    const Eigen::Matrix<real, dim, dim>& Sst() const { return Sst_; }
+    const Eigen::Matrix<real, dim, dim>& Ust() const { return Ust_; }
+    const Eigen::Matrix<real, dim, 1>& sigst() const { return sigst_; }
+    const Eigen::Matrix<real, dim, dim>& Vst() const { return Vst_; }
 
 private:
     // F = U * sig * V.transpose()
@@ -25,6 +35,14 @@ private:
     Eigen::Matrix<real, dim, 1> sig_;
     Eigen::Matrix<real, dim, dim> R_;
     Eigen::Matrix<real, dim, dim> S_;
+
+    Eigen::Matrix<real, dim, dim> A_; // shape target act
+    Eigen::Matrix<real, dim, dim> Fst_; // shape target FA
+    Eigen::Matrix<real, dim, dim> Rst_; // shape target R*
+    Eigen::Matrix<real, dim, dim> Sst_; // shape target S*
+    Eigen::Matrix<real, dim, dim> Ust_; // shape target U*
+    Eigen::Matrix<real, dim, 1> sigst_; // shape target sig*
+    Eigen::Matrix<real, dim, dim> Vst_; // shape target V*
 };
 
 #endif

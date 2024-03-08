@@ -285,20 +285,19 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetComputeAuxiliaryDeformation
         F_auxiliary_[i].resize(sample_num);
         for (int j = 0; j < sample_num; ++j) {
             auto F = DeformationGradient(i, deformed, j);
-            if (use_FA_not_F){
-                Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat;
-                A_mat(0, 0) = act[i * sample_num * 6 + j * 6 + 0];
-                A_mat(0, 1) = act[i * sample_num * 6 + j * 6 + 1];
-                A_mat(0, 2) = act[i * sample_num * 6 + j * 6 + 2];
-                A_mat(1, 0) = act[i * sample_num * 6 + j * 6 + 1];
-                A_mat(1, 1) = act[i * sample_num * 6 + j * 6 + 3];
-                A_mat(1, 2) = act[i * sample_num * 6 + j * 6 + 4];
-                A_mat(2, 0) = act[i * sample_num * 6 + j * 6 + 2];
-                A_mat(2, 1) = act[i * sample_num * 6 + j * 6 + 4];
-                A_mat(2, 2) = act[i * sample_num * 6 + j * 6 + 5];
-                F = F * A_mat;
-            }
-            F_auxiliary_[i][j].Initialize(F); // Extract U, V, sig, R, S
+            
+            Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat;
+            A_mat(0, 0) = act[i * sample_num * 6 + j * 6 + 0];
+            A_mat(0, 1) = act[i * sample_num * 6 + j * 6 + 1];
+            A_mat(0, 2) = act[i * sample_num * 6 + j * 6 + 2];
+            A_mat(1, 0) = act[i * sample_num * 6 + j * 6 + 1];
+            A_mat(1, 1) = act[i * sample_num * 6 + j * 6 + 3];
+            A_mat(1, 2) = act[i * sample_num * 6 + j * 6 + 4];
+            A_mat(2, 0) = act[i * sample_num * 6 + j * 6 + 2];
+            A_mat(2, 1) = act[i * sample_num * 6 + j * 6 + 4];
+            A_mat(2, 2) = act[i * sample_num * 6 + j * 6 + 5];
+                
+            F_auxiliary_[i][j].Initialize(F, A_mat); // Extract U, V, sig, R, S
         }
     }
     // skip the projection as R * A is not provided until later
@@ -355,19 +354,9 @@ const real Deformable<vertex_dim, element_dim>::ShapeTargetingEnergy(const Vecto
         // const auto deformed = ScatterToElement(q, i); Not used because we enforce precomputed F_auxiliary_
         for (int j = 0; j < sample_num; ++j) {
             const auto F = F_auxiliary_[i][j].F();
-            const auto R = F_auxiliary_[i][j].R();
-            // A is 1x6 per sample point, assemble it into a symmetric 3x3 matrix
-            Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat;
-            A_mat(0, 0) = act[i * sample_num * 6 + j * 6 + 0];
-            A_mat(0, 1) = act[i * sample_num * 6 + j * 6 + 1];
-            A_mat(0, 2) = act[i * sample_num * 6 + j * 6 + 2];
-            A_mat(1, 0) = act[i * sample_num * 6 + j * 6 + 1];
-            A_mat(1, 1) = act[i * sample_num * 6 + j * 6 + 3];
-            A_mat(1, 2) = act[i * sample_num * 6 + j * 6 + 4];
-            A_mat(2, 0) = act[i * sample_num * 6 + j * 6 + 2];
-            A_mat(2, 1) = act[i * sample_num * 6 + j * 6 + 4];
-            A_mat(2, 2) = act[i * sample_num * 6 + j * 6 + 5];
-            element_energy[i] += EnergyDensity(F, R, A_mat) * element_volume_ / sample_num;
+            const auto Rst = F_auxiliary_[i][j].Rst();
+            const auto A = F_auxiliary_[i][j].A();
+            element_energy[i] += EnergyDensity(F, Rst, A) * element_volume_ / sample_num;
         }
     }
     for (const auto& e : element_energy) total_energy += e;
@@ -393,20 +382,10 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetingForce(const Ve
         // const auto deformed = ScatterToElement(q, i);
         for (int j = 0; j < sample_num; ++j) {
             const auto F = F_auxiliary_[i][j].F();
-            const auto R = F_auxiliary_[i][j].R();
-            // A is 1x6 per sample point, assemble it into a symmetric 3x3 matrix
-            Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat;
-            A_mat(0, 0) = act[i * sample_num * 6 + j * 6 + 0];
-            A_mat(0, 1) = act[i * sample_num * 6 + j * 6 + 1];
-            A_mat(0, 2) = act[i * sample_num * 6 + j * 6 + 2];
-            A_mat(1, 0) = act[i * sample_num * 6 + j * 6 + 1];
-            A_mat(1, 1) = act[i * sample_num * 6 + j * 6 + 3];
-            A_mat(1, 2) = act[i * sample_num * 6 + j * 6 + 4];
-            A_mat(2, 0) = act[i * sample_num * 6 + j * 6 + 2];
-            A_mat(2, 1) = act[i * sample_num * 6 + j * 6 + 4];
-            A_mat(2, 2) = act[i * sample_num * 6 + j * 6 + 5];
+            const auto Rst = F_auxiliary_[i][j].Rst();
+            const auto A = F_auxiliary_[i][j].A();
             
-            Eigen::Matrix<real, vertex_dim, vertex_dim> P = StressTensor(F, R, A_mat);
+            Eigen::Matrix<real, vertex_dim, vertex_dim> P = StressTensor(F, Rst, A);
             const Eigen::Matrix<real, 1, vertex_dim * element_dim> f_kd =
                 -Flatten(P).transpose() * finite_element_samples_[i][j].dF_dxkd_flattened() * element_volume_ / sample_num;
             for (int k = 0; k < element_dim; ++k) {
