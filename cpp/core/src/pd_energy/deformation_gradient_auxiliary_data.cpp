@@ -31,6 +31,8 @@ void DeformationGradientAuxiliaryData<dim>::Initialize(const Eigen::Matrix<real,
     sigst_ = svd_st.singularValues();
     Rst_ = Ust_ * Vst_.transpose();
     Sst_ = Vst_ * sigst_.asDiagonal() * Vst_.transpose();
+
+    use_shape_target_ = true;
 }
 
 template class DeformationGradientAuxiliaryData<2>;

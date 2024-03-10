@@ -19,13 +19,13 @@ public:
     const Eigen::Matrix<real, dim, dim>& S() const { return S_; }
 
     // add shape target act
-    const Eigen::Matrix<real, dim, dim>& A() const { return A_; }
-    const Eigen::Matrix<real, dim, dim>& Fst() const { return Fst_; }
-    const Eigen::Matrix<real, dim, dim>& Rst() const { return Rst_; }
-    const Eigen::Matrix<real, dim, dim>& Sst() const { return Sst_; }
-    const Eigen::Matrix<real, dim, dim>& Ust() const { return Ust_; }
-    const Eigen::Matrix<real, dim, 1>& sigst() const { return sigst_; }
-    const Eigen::Matrix<real, dim, dim>& Vst() const { return Vst_; }
+    const Eigen::Matrix<real, dim, dim>& A()   const {  assert(use_shape_target_); return A_; }
+    const Eigen::Matrix<real, dim, dim>& Fst() const {  assert(use_shape_target_); return Fst_; }
+    const Eigen::Matrix<real, dim, dim>& Rst() const {  assert(use_shape_target_); return Rst_; }
+    const Eigen::Matrix<real, dim, dim>& Sst() const {  assert(use_shape_target_); return Sst_; }
+    const Eigen::Matrix<real, dim, dim>& Ust() const {  assert(use_shape_target_); return Ust_; }
+    const Eigen::Matrix<real, dim, 1>& sigst() const {  assert(use_shape_target_); return sigst_; }
+    const Eigen::Matrix<real, dim, dim>& Vst() const {  assert(use_shape_target_); return Vst_; }
 
 private:
     // F = U * sig * V.transpose()
@@ -43,6 +43,8 @@ private:
     Eigen::Matrix<real, dim, dim> Ust_; // shape target U*
     Eigen::Matrix<real, dim, 1> sigst_; // shape target sig*
     Eigen::Matrix<real, dim, dim> Vst_; // shape target V*
+
+    bool use_shape_target_ = false;
 };
 
 #endif
