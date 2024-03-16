@@ -280,6 +280,8 @@ private:
     ) const;
     const VectorXr ApplyShapeTargetingLocalStepDifferential(const VectorXr& q_cur, const VectorXr& act,
         const std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& dA, const VectorXr& Z) const;
+    void ShapeTargetGradientCheck(const VectorXr& q, const VectorXr& act, 
+        std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& dA) const;
 
     const VectorXr PdLhsMatrixOp(const VectorXr& q, const std::map<int, real>& additional_dirichlet_boundary_condition) const;
 
