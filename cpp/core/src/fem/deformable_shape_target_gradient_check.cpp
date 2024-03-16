@@ -18,14 +18,6 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
     const real w_ = shape_target_stiffness_ * element_volume_ / sample_num;
     auto q_plus = q_next + eps_vec;
     auto q_minus = q_next - eps_vec;
-    auto F_default = F_auxiliary_[10][10];
-    Eigen::Matrix<real, vertex_dim, vertex_dim> f_default = F_default.F();
-    Eigen::Matrix<real, vertex_dim, vertex_dim> f_plus = F_default.F() + eps_mat;
-    Eigen::Matrix<real, vertex_dim, vertex_dim> f_minus = F_default.F() - eps_mat;
-    DeformationGradientAuxiliaryData<vertex_dim> F_plus;
-    F_plus.Initialize(f_plus);  
-    DeformationGradientAuxiliaryData<vertex_dim> F_minus;
-    F_minus.Initialize(f_minus);        
     auto relativeDiff = [&](const VectorXr& a, const VectorXr& b) {
         return (a - b).norm();
     }; 
@@ -197,9 +189,21 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         CheckError(pref_diff < 1e-10, "pref_diff < 1e-10");
         // This shows that PdLhsMatrixOp works with column wise flatten
     };
-    auto rotationGradiant = [&](const DeformationGradientAuxiliaryData<vertex_dim>& F){
+    auto rotationGradiant = [&](const DeformationGradientAuxiliaryData<vertex_dim>& F, bool use_st = false){
             // following code compute with SVD of St version in aux data
-            const Eigen::Matrix<real, vertex_dim, 1>& sig = F.sigst();
+            Eigen::Matrix<real, vertex_dim, 1> sig;
+            Eigen::Matrix<real, vertex_dim, vertex_dim> U;
+            Eigen::Matrix<real, vertex_dim, vertex_dim> V;
+            if (use_st){
+                sig = F.sigst();
+                U = F.Ust();
+                V = F.Vst();
+            } else {
+                sig = F.sig();
+                U = F.U();
+                V = F.V();
+            }
+                
 
             real lambda0 = 2 / (sig(0) + sig(1));
             real lambda1 = 2 / (sig(1) + sig(2));
@@ -208,9 +212,9 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
             Eigen::Matrix<real, vertex_dim, vertex_dim> q_0 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, -1, 0, 1, 0, 0, 0, 0, 0).finished();
             Eigen::Matrix<real, vertex_dim, vertex_dim> q_1 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, 0, 0, 0, 0, 1, 0, -1, 0).finished();
             Eigen::Matrix<real, vertex_dim, vertex_dim> q_2 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, 0, 1, 0, 0, 0, -1, 0, 0).finished();
-            Eigen::Matrix<real, vertex_dim, vertex_dim> Q0 = (1/sqrt(2)) * F.Ust() * q_0 * F.Vst().transpose();
-            Eigen::Matrix<real, vertex_dim, vertex_dim> Q1 = (1/sqrt(2)) * F.Ust() * q_1 * F.Vst().transpose();
-            Eigen::Matrix<real, vertex_dim, vertex_dim> Q2 = (1/sqrt(2)) * F.Ust() * q_2 * F.Vst().transpose();
+            Eigen::Matrix<real, vertex_dim, vertex_dim> Q0 = (1/sqrt(2)) * U * q_0 * V.transpose();
+            Eigen::Matrix<real, vertex_dim, vertex_dim> Q1 = (1/sqrt(2)) * U * q_1 * V.transpose();
+            Eigen::Matrix<real, vertex_dim, vertex_dim> Q2 = (1/sqrt(2)) * U * q_2 * V.transpose();
 
             Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ0 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q0.data(), vertex_dim*vertex_dim, 1);
             Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ1 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q1.data(), vertex_dim*vertex_dim, 1);
@@ -223,48 +227,207 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         }; 
 
     // first test first order gradient
-    bool check_firstOrder_gradient = false;
+    bool check_firstOrder_gradient = true;
     if(check_firstOrder_gradient){
-        ShapeTargetComputeAuxiliaryDeformationGradient(q_next, act);
-        auto force_q_act = ShapeTargetingForce(q_next, act);
-        auto dE_dq_current = dE_dq(q_next, act);
-        ShapeTargetComputeAuxiliaryDeformationGradient(q_plus, act);
-        auto force_q_plus_act = ShapeTargetingForce(q_plus, act);
-        auto dE_dq_plus = dE_dq(q_plus, act);
-        ShapeTargetComputeAuxiliaryDeformationGradient(q_minus, act);
-        auto force_q_minus_act = ShapeTargetingForce(q_minus, act);
-        auto dE_dq_minus = dE_dq(q_minus, act);
+        // first order gradient check. Alread passed
+        bool check_dE_dq = false;
+        if (check_dE_dq) { 
+            ShapeTargetComputeAuxiliaryDeformationGradient(q_next, act);
+            auto force_q_act = ShapeTargetingForce(q_next, act);
+            auto dE_dq_current = dE_dq(q_next, act);
+            ShapeTargetComputeAuxiliaryDeformationGradient(q_plus, act);
+            auto force_q_plus_act = ShapeTargetingForce(q_plus, act);
+            auto dE_dq_plus = dE_dq(q_plus, act);
+            ShapeTargetComputeAuxiliaryDeformationGradient(q_minus, act);
+            auto force_q_minus_act = ShapeTargetingForce(q_minus, act);
+            auto dE_dq_minus = dE_dq(q_minus, act);
 
-        auto force_diff = (force_q_plus_act - force_q_minus_act) / (2 * eps);
-        auto force_diff_norm = force_diff.norm();
-        std::cout << "force_diff_norm = " << force_diff_norm << std::endl;
-        std::cout << "force nonzero check: " << force_q_act.norm() << std::endl;
+            auto force_diff = (force_q_plus_act - force_q_minus_act) / (2 * eps);
+            auto force_diff_norm = force_diff.norm();
+            std::cout << "force_diff_norm = " << force_diff_norm << std::endl;
+            std::cout << "force nonzero check: " << force_q_act.norm() << std::endl;
 
-        auto dE_dq_diff = (dE_dq_plus - dE_dq_minus) / (2 * eps);
-        auto dE_dq_diff_norm = dE_dq_diff.norm();
-        std::cout << "dE_dq_diff_norm = " << dE_dq_diff_norm << std::endl;
-        std::cout << "dE_dq_current: " << dE_dq_current.norm() << ", force_q_act: " << force_q_act.norm() << std::endl;
+            auto dE_dq_diff = (dE_dq_plus - dE_dq_minus) / (2 * eps);
+            auto dE_dq_diff_norm = dE_dq_diff.norm();
+            std::cout << "dE_dq_diff_norm = " << dE_dq_diff_norm << std::endl;
+            std::cout << "dE_dq_current: " << dE_dq_current.norm() << ", force_q_act: " << force_q_act.norm() << std::endl;
+        } 
+        // check dR_dF
+        // first pick a random element id and sample id
+        bool check_dR_dF = true;
+        if(check_dR_dF){
+            int element_start = 300;
+            int element_range = 1;
+            for( int element_id = element_start; element_id < element_start + element_range; element_id++){
+                // int element_id = 300; // 0-2500 
+                int sample_id = 5; // 0-7
+                // get vi 
+                const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(element_id);
+                int vertex_id = vi(sample_id);
+                // get current deformation gradient
+                auto F_auxi = F_auxiliary_[element_id][sample_id]; // has been initialized with current q_next
+                Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
+                VectorXr q_pertubated_plus = q_next;
+                q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
+                Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_plus = ScatterToElement(q_pertubated_plus, element_id);
+                VectorXr q_pertubated_minus = q_next;
+                q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
+                Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_minus = ScatterToElement(q_pertubated_minus, element_id);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> f_default = F_auxi.F();
+                Eigen::Matrix<real, vertex_dim, vertex_dim> f_plus = DeformationGradient(element_id, q_scatter_plus, sample_id);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> f_minus = DeformationGradient(element_id, q_scatter_minus, sample_id);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> f_diff = f_plus - f_minus;
+                VectorXr f_diff_flatten = Eigen::Map<VectorXr>(f_diff.data(), vertex_dim * vertex_dim); // col wise
 
-        auto dF_dR_default = dRFromdF(F_default.F(), F_default.R(), F_default.S());
-        auto dF_dR_plus = dRFromdF(F_plus.F(), F_plus.R(), F_plus.S());
-        auto dF_dR_minus = dRFromdF(F_minus.F(), F_minus.R(), F_minus.S());
-        auto dF_dR_diff = (dF_dR_plus - dF_dR_minus) / (2 * eps);
-        auto dF_dR_relative = (dF_dR_plus - dF_dR_minus).norm() ;
-        std::cout << "dR_dF_default_impl_relative: " << dF_dR_relative << std::endl;
-        std::cout << "dR_dF non zero check: " << dF_dR_default.norm() << std::endl;
+                F_auxi.Initialize(f_default);
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF_default = dRFromdF(F_auxi.F(), F_auxi.R(), F_auxi.S());
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF_rotationGradiant = rotationGradiant(F_auxi, false);
+                Eigen::Matrix<real, vertex_dim * vertex_dim, 1> estiamted_dR_default = dR_dF_default * f_diff_flatten;
+                Eigen::Matrix<real, vertex_dim * vertex_dim, 1> estiamted_dR_rotationGradiant = dR_dF_rotationGradiant * f_diff_flatten;
+                F_auxi.Initialize(f_plus);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> R_plus = F_auxi.R();
+                F_auxi.Initialize(f_minus);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> R_minus = F_auxi.R();
+                Eigen::Matrix<real, vertex_dim, vertex_dim> R_diff = R_plus - R_minus;
+                VectorXr R_diff_flatten = Eigen::Map<VectorXr>(R_diff.data(), vertex_dim * vertex_dim); // col wise
+                bool print_verbose = false;
+                if(print_verbose){
+                    std::cout << "Error of dR_dF: " << estiamted_dR_default.norm() - R_diff_flatten.norm() 
+                                << ", with estiamted_dR_default.norm() = " << estiamted_dR_default.norm() 
+                                << ", R_diff_flatten.norm() = " << R_diff_flatten.norm()
+                                << std::endl;
+                    std::cout << "dR_dF non zero check: " << dR_dF_default.norm() << std::endl;
+                    std::cout << "Error of dR_dF_rotationGradiant: " << estiamted_dR_rotationGradiant.norm() - R_diff_flatten.norm() 
+                                << ", with estiamted_dR_rotationGradiant.norm() = " << estiamted_dR_rotationGradiant.norm()
+                                << ", R_diff_flatten.norm() = " << R_diff_flatten.norm()
+                                << std::endl;
+                    std::cout << "dR_dF_rotationGradiant non zero check: " << dR_dF_rotationGradiant.norm() << std::endl;
+                }
+                CheckError(estiamted_dR_default.norm() - R_diff_flatten.norm() < 1e-8, "estiamted_dR_default.norm() - R_diff_flatten.norm() < 1e-8");
+                CheckError(estiamted_dR_rotationGradiant.norm() - R_diff_flatten.norm() < 1e-8, "estiamted_dR_rotationGradiant.norm() - R_diff_flatten.norm() < 1e-8");
+                CheckError(estiamted_dR_default.norm() - estiamted_dR_rotationGradiant.norm() < 1e-8, "estiamted_dR_default.norm() == estiamted_dR_rotationGradiant.norm()");
+            }   
+        }
+        // check dR_dq as dR_dF * dF_dq. Pretty much equivalent to dR_dF * Gc
+        bool check_dR_dq_through_dF_dq = true;
+        if(check_dR_dq_through_dF_dq){
+            int element_id = 300; // 0-2500
+            int sample_id = 5; // 0-7
+            const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(element_id);
+            int vertex_id = vi(sample_id);
+            // get current deformation gradient
+            auto F_auxi = F_auxiliary_[element_id][sample_id]; // has been initialized with current q_next
+            Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
+            VectorXr q_pertubated_plus = q_next;
+            q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
+            Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_plus = ScatterToElement(q_pertubated_plus, element_id);
+            Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_plus = ScatterToElementFlattened(q_pertubated_plus, element_id);
+            VectorXr q_pertubated_minus = q_next;
+            q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
+            Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_minus = ScatterToElement(q_pertubated_minus, element_id);
+            Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_minus = ScatterToElementFlattened(q_pertubated_minus, element_id);
+            Eigen::Matrix<real, vertex_dim, vertex_dim> f_default = F_auxi.F();
+            Eigen::Matrix<real, vertex_dim, vertex_dim> f_plus = DeformationGradient(element_id, q_scatter_plus, sample_id);
+            Eigen::Matrix<real, vertex_dim, vertex_dim> f_minus = DeformationGradient(element_id, q_scatter_minus, sample_id);
+            Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_diff = q_flatten_plus - q_flatten_minus;
+            
+            F_auxi.Initialize(f_default);
+            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * element_dim> Gc = finite_element_samples_[element_id][sample_id].dF_dxkd_flattened();
+            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF_default = dRFromdF(F_auxi.F(), F_auxi.R(), F_auxi.S());
+            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF_rotationGradiant = rotationGradiant(F_auxi, false);
+            Eigen::Matrix<real, vertex_dim * vertex_dim, 1> estiamted_dR_dq = dR_dF_default * Gc * q_flatten_diff; // 9x9 * 9x24 * 24x1
+            Eigen::Matrix<real, vertex_dim * vertex_dim, 1> estiamted_dR_dq_rotationGradiant = dR_dF_rotationGradiant * Gc * q_flatten_diff;
+            F_auxi.Initialize(f_plus);
+            Eigen::Matrix<real, vertex_dim, vertex_dim> R_plus = F_auxi.R();
+            F_auxi.Initialize(f_minus);
+            Eigen::Matrix<real, vertex_dim, vertex_dim> R_minus = F_auxi.R();
+            Eigen::Matrix<real, vertex_dim, vertex_dim> R_diff = R_plus - R_minus;
+            VectorXr R_diff_flatten = Eigen::Map<VectorXr>(R_diff.data(), vertex_dim * vertex_dim); // col wise
 
-        auto dR_dF_default = rotationGradiant(F_default); 
-        auto dR_dF_plus = rotationGradiant(F_plus);
-        auto dR_dF_minus = rotationGradiant(F_minus);
-        auto dR_dF_diff = (dR_dF_plus - dR_dF_minus) / (2 * eps);
-        auto dR_dF_relative = (dR_dF_plus - dR_dF_minus).norm() ;
-        std::cout << "dR_dF_relative = " << dR_dF_relative << ". Failed." << std::endl;
-        std::cout << "dR_dF non zero check: " << dR_dF_default.norm() << std::endl;
+            std::cout << "Error of dR_dq: " << estiamted_dR_dq.norm() - R_diff_flatten.norm() 
+                        << ", with estiamted_dR_dq.norm() = " << estiamted_dR_dq.norm() 
+                        << ", R_diff_flatten.norm() = " << R_diff_flatten.norm()
+                        << std::endl;
+            std::cout << "dR_dq non zero check: " << dR_dF_default.norm() << std::endl;
+            std::cout << "Error of dR_dq_rotationGradiant: " << estiamted_dR_dq_rotationGradiant.norm() - R_diff_flatten.norm() 
+                        << ", with estiamted_dR_dq_rotationGradiant.norm() = " << estiamted_dR_dq_rotationGradiant.norm()
+                        << ", R_diff_flatten.norm() = " << R_diff_flatten.norm()
+                        << std::endl;
+            std::cout << "dR_dq_rotationGradiant non zero check: " << dR_dF_rotationGradiant.norm() << std::endl;
+        }
+        // check d(Rst * A) / dq
+        bool check_dRstA_dq = true;
+        if(check_dRstA_dq){
+            int element_start = 0;
+            int element_range = 2000;
+            real total_error = 0;
+            for( int element_id = element_start; element_id < element_start + element_range; element_id++){
+                int sample_id = 5; // 0-7
+                const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(element_id);
+                int vertex_id = vi(sample_id);
+                // get current deformation gradient
+                auto F_auxi = F_auxiliary_[element_id][sample_id]; // has been initialized with current q_next
+                Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
+                VectorXr q_pertubated_plus = q_next;
+                q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
+                Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_plus = ScatterToElement(q_pertubated_plus, element_id);
+                Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_plus = ScatterToElementFlattened(q_pertubated_plus, element_id);
+                VectorXr q_pertubated_minus = q_next;
+                q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
+                Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_minus = ScatterToElement(q_pertubated_minus, element_id);
+                Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_minus = ScatterToElementFlattened(q_pertubated_minus, element_id);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> Fst_default = F_auxi.Fst();
+                Eigen::Matrix<real, vertex_dim, vertex_dim> f_default = F_auxi.F();
+                Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat = F_auxi.A(); 
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> A_expand; A_expand.setZero();
+                for(int k = 0; k < vertex_dim; ++k){
+                    for(int l = 0; l < vertex_dim; ++l){
+                        // A_expand(k, l) = A_mat(l, k);
+                        // A_expand(k + vertex_dim, l + vertex_dim) = A_mat(l, k);
+                        // A_expand(k + 2 * vertex_dim, l + 2 * vertex_dim) = A_mat(l, k);
+                        A_expand( vertex_dim * k + 0, vertex_dim * l + 0) = A_mat(l, k);    
+                        A_expand( vertex_dim * k + 1, vertex_dim * l + 1) = A_mat(l, k);    
+                        A_expand( vertex_dim * k + 2, vertex_dim * l + 2) = A_mat(l, k);    
+                    }
+                }
+                Eigen::Matrix<real, vertex_dim, vertex_dim> f_plus = DeformationGradient(element_id, q_scatter_plus, sample_id);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> f_minus = DeformationGradient(element_id, q_scatter_minus, sample_id);
+                Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_diff = q_flatten_plus - q_flatten_minus;
 
-        Compare_prefactor(q_next, act);
+                // F_auxi as f_default and A
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * element_dim> Gc = finite_element_samples_[element_id][sample_id].dF_dxkd_flattened();
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dRst_dFst_default = dRFromdF(F_auxi.Fst(), F_auxi.Rst(), F_auxi.Sst());
+                Eigen::Matrix<real, vertex_dim * vertex_dim, 1> estiamted_dRst_dq =  dRst_dFst_default * A_expand * Gc * q_flatten_diff; // 9x9 * 9x24 * 24x1
+                // No seriously, I tried these for dRst_dq:
+                   // A_expand with two different order as a few lines above
+                   // A_expand * Gc * A_expand, A_expand * Gc, Gc * A_expand, Gc. And this so far is the only comb that give me -e9 level error, 
+                   // which is about the same as dR_dF
+                F_auxi.Initialize(f_plus, A_mat);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_plus = F_auxi.Rst();
+                F_auxi.Initialize(f_minus, A_mat);
+                Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_minus = F_auxi.Rst();
+                Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_diff = Rst_plus - Rst_minus;
+                VectorXr Rst_diff_flatten = Eigen::Map<VectorXr>(Rst_diff.data(), vertex_dim * vertex_dim); // col wise
+                bool verbose = false;
+                if(verbose){
+                    std::cout << "Error of dRst_dq: " << abs(estiamted_dRst_dq.norm() - Rst_diff_flatten.norm()) 
+                                << ", with estiamted_dRst_dq.norm() = " << estiamted_dRst_dq.norm() 
+                                << ", Rst_diff_flatten.norm() = " << Rst_diff_flatten.norm()
+                                << std::endl;
+                    std::cout << "dRst_dq non zero check: " << dRst_dFst_default.norm() << std::endl;
+                }
+                total_error += abs(estiamted_dRst_dq.norm() - Rst_diff_flatten.norm());
+            }
+            std::cout << "Avg error of dRst_dq: " << total_error / element_range << std::endl;
+        }
+        // Compare MatrixOp with w * Gc.T * Gc
+        bool check_MatrixOp = false;
+        if(check_MatrixOp){
+            Compare_prefactor(q_next, act);
+        }
     }
     // gradiant check END
-    bool check_secondOrder_hessian = true;
+    bool check_secondOrder_hessian = false;
     if(check_secondOrder_hessian){    
         auto HessAtQ = [&](const VectorXr& q, const VectorXr& act, std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& hess_q){
             ShapeTargetComputeAuxiliaryDeformationGradient(q, act); // update deformation gradient 
