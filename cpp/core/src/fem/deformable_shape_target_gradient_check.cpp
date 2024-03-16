@@ -154,6 +154,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         }
         return dE;                
     };
+    
     auto Compare_prefactor = [&](const VectorXr q, const VectorXr& act){
         // previous dE_dq is computed as w * Gc * (Gc * q_flatten - A_expand * Rst_flatten)
         // this function use the prefactor w * Gc * Gc^T (or A_star). so A_star * q_flatten - w * Gc * (A_expand * Rst_flatten)
@@ -231,30 +232,109 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
     if(check_firstOrder_gradient){
         // first order gradient check. Alread passed
         bool check_dE_dq = false;
-        if (check_dE_dq) { 
+        if (check_dE_dq) {  
+            auto dE_dq_rhs = [&](const VectorXr& q, const VectorXr& act) { // w_ * Gc.T * RA
+                VectorXr dE_rhs = VectorXr::Zero(q.size());
+                for (int i = 0; i < element_num; i++) {
+                    const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(i);
+                    Eigen::Matrix<real, vertex_dim * element_dim, 1> dE_dq_local_sum; dE_dq_local_sum.setZero();
+                    for (int j = 0; j < sample_num; ++j) {
+                        Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * element_dim> Gc = finite_element_samples_[i][j].dF_dxkd_flattened();
+                        DeformationGradientAuxiliaryData<vertex_dim>& F = F_auxiliary_[i][j];
+                        Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat = F.A(); 
+                        
+                        Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> A_expand; A_expand.setZero();
+                        Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> Rst_T_expand; Rst_T_expand.setZero();
+                        CheckError(vertex_dim == 3, "Only 3d is supported in shape targeting now");
+                        for(int k = 0; k < vertex_dim; ++k){
+                            for(int l = 0; l < vertex_dim; ++l){
+                                A_expand(k, l) = A_mat(l, k);
+                                A_expand(k + vertex_dim, l + vertex_dim) = A_mat(l, k);
+                                A_expand(k + 2 * vertex_dim, l + 2 * vertex_dim) = A_mat(l, k);
+                            }
+                        }
+                        for(int k = 0; k < vertex_dim; ++k){
+                            for(int l = 0; l < vertex_dim; ++l){
+                                Rst_T_expand(k, l) = F.Rst().transpose()(l, k);
+                                Rst_T_expand(k + vertex_dim, l + vertex_dim) = F.Rst().transpose()(l, k);
+                                Rst_T_expand(k + 2 * vertex_dim, l + 2 * vertex_dim) = F.Rst().transpose()(l, k);
+                            }
+                        }
+                        // row wise flatten Rst and A
+                        Eigen::Matrix<real, vertex_dim, vertex_dim> A = F.A();
+                        Eigen::Matrix<real, vertex_dim, vertex_dim> Rst = F.Rst();
+                        VectorXr A_flatten = VectorXr::Zero(vertex_dim * vertex_dim);
+                        VectorXr rst_flatten = VectorXr::Zero(vertex_dim * vertex_dim);
+                        for(int k = 0; k < vertex_dim; ++k){
+                            rst_flatten.segment(k * vertex_dim, vertex_dim) = Rst.row(k);
+                            A_flatten.segment(k * vertex_dim, vertex_dim) = A.row(k); // A.T flatten, but A is symmetric so it is the same
+                        }  
+                        // compute A_expand_r_flatten
+                        VectorXr A_expand_r_flatten = A_expand * rst_flatten;
+                        VectorXr Rst_T_expand_A_flatten = Rst_T_expand * A_flatten;
+                        // compare with Rst * A_mat 
+                        Eigen::Matrix<real, vertex_dim, vertex_dim> RA = Rst * A_mat;
+                        VectorXr RA_flatten = Eigen::Map<VectorXr>(RA.data(), vertex_dim * vertex_dim); // col wise
+                        for(int k = 0; k < vertex_dim * vertex_dim; ++k) { 
+                            CheckError( abs(RA_flatten(k) - Rst_T_expand_A_flatten(k) ) <= 1e-10, "RA_flatten(k) == rstt_expand_a_flatten(k)");
+                                // CheckError( abs(RA_flatten(k) - A_expand_r_flatten(k) ) <= 1e-10, "RA_flatten(k) == A_expand_r_flatten(k)");
+                                // Ar equal to row wise flatten of Rst * A_mat
+                        } 
+                        // Then compare with stress
+                        VectorXr local_dE =  Rst_T_expand * A_flatten;  // 9x1
+                        const auto local_dE_dq = w_ * Gc.transpose() * local_dE; // 24x9 * 9x1                 
+                        
+                        dE_dq_local_sum = dE_dq_local_sum + local_dE_dq; 
+                        // for reasons that ShapeTargetingForce uses -Flatten(P).transpose() * Gc, the differentiation is different from
+                        // force. But I will leave it here for now.
+                    }
+
+                    for( int j = 0; j < sample_num; ++j){
+                        dE_rhs.segment(vertex_dim * vi(j), vertex_dim) += dE_dq_local_sum.segment(j * vertex_dim, vertex_dim);
+                    }
+                }
+                return dE_rhs;                
+            };
+    
+            int element_id = 300; 
+            int sample_id = 5; // 0-7
+            const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(element_id);
+            int vertex_id = vi(sample_id);
+            Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
+            std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>> hess_at_q; 
+            VectorXr q_pertubated_plus = q_next;
+            q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
+            VectorXr q_pertubated_minus = q_next;
+            q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
             ShapeTargetComputeAuxiliaryDeformationGradient(q_next, act);
             auto force_q_act = ShapeTargetingForce(q_next, act);
             auto dE_dq_current = dE_dq(q_next, act);
-            ShapeTargetComputeAuxiliaryDeformationGradient(q_plus, act);
-            auto force_q_plus_act = ShapeTargetingForce(q_plus, act);
-            auto dE_dq_plus = dE_dq(q_plus, act);
-            ShapeTargetComputeAuxiliaryDeformationGradient(q_minus, act);
-            auto force_q_minus_act = ShapeTargetingForce(q_minus, act);
-            auto dE_dq_minus = dE_dq(q_minus, act);
-
-            auto force_diff = (force_q_plus_act - force_q_minus_act) / (2 * eps);
-            auto force_diff_norm = force_diff.norm();
-            std::cout << "force_diff_norm = " << force_diff_norm << std::endl;
-            std::cout << "force nonzero check: " << force_q_act.norm() << std::endl;
-
-            auto dE_dq_diff = (dE_dq_plus - dE_dq_minus) / (2 * eps);
-            auto dE_dq_diff_norm = dE_dq_diff.norm();
-            std::cout << "dE_dq_diff_norm = " << dE_dq_diff_norm << std::endl;
-            std::cout << "dE_dq_current: " << dE_dq_current.norm() << ", force_q_act: " << force_q_act.norm() << std::endl;
+            // compare with A - dA, prepare for hessian check
+            VectorXr dE_dq_current_lhs = PdLhsMatrixOp(q_next, augmented_dirichlet);
+            VectorXr dE_dq_current_rhs = dE_dq_rhs(q_next, act);
+            VectorXr dE_dq_current_op = dE_dq_current_lhs - dE_dq_current_rhs;
+            ShapeTargetComputeAuxiliaryDeformationGradient(q_pertubated_plus, act);
+            auto force_q_plus_act = ShapeTargetingForce(q_pertubated_plus, act);
+            auto energy_q_plus = ShapeTargetingEnergy(q_pertubated_plus, act);
+            auto dE_dq_plus = dE_dq(q_pertubated_plus, act); 
+            ShapeTargetComputeAuxiliaryDeformationGradient(q_pertubated_minus, act);
+            auto force_q_minus_act = ShapeTargetingForce(q_pertubated_minus, act);
+            auto energy_q_minus = ShapeTargetingEnergy(q_pertubated_minus, act);
+            auto dE_dq_minus = dE_dq(q_pertubated_minus, act);  
+            // first compare with shape targeting force
+            std::cout << "diff w op = " << force_q_act.norm() - dE_dq_current_op.norm() << std::endl;
+            CheckError(force_q_act.norm() - dE_dq_current.norm() < 1e-15, "force_q_act.norm() - dE_dq_current.norm() < 1e-8");            
+            CheckError(force_q_plus_act.norm() - dE_dq_plus.norm() < 1e-15, "force_q_plus_act.norm() - dE_dq_plus.norm() < 1e-8");            
+            CheckError(force_q_minus_act.norm() - dE_dq_minus.norm() < 1e-15, "force_q_minus_act.norm() - dE_dq_minus.norm() < 1e-8");
+            CheckError(dE_dq_current_op.norm() - dE_dq_current.norm() < 1e-15, "dE_dq_current_op.norm() - dE_dq_current.norm() < 1e-8");
+            // next check numerical gradient
+            real energy_diff = energy_q_plus - energy_q_minus;
+            real energy_from_force = force_q_act.dot(q_pertubated_plus - q_pertubated_minus);
+            std::cout << "energy_diff = " << energy_diff << ", energy_from_force = " << energy_from_force << ", diff = " << energy_diff - energy_from_force << std::endl;
         } 
         // check dR_dF
         // first pick a random element id and sample id
-        bool check_dR_dF = true;
+        bool check_dR_dF = false;
         if(check_dR_dF){
             int element_start = 300;
             int element_range = 1;
@@ -309,7 +389,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
             }   
         }
         // check dR_dq as dR_dF * dF_dq. Pretty much equivalent to dR_dF * Gc
-        bool check_dR_dq_through_dF_dq = true;
+        bool check_dR_dq_through_dF_dq = false;
         if(check_dR_dq_through_dF_dq){
             int element_id = 300; // 0-2500
             int sample_id = 5; // 0-7
@@ -358,67 +438,116 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         // check d(Rst * A) / dq
         bool check_dRstA_dq = true;
         if(check_dRstA_dq){
-            int element_start = 0;
-            int element_range = 2000;
-            real total_error = 0;
-            for( int element_id = element_start; element_id < element_start + element_range; element_id++){
-                int sample_id = 5; // 0-7
-                const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(element_id);
-                int vertex_id = vi(sample_id);
-                // get current deformation gradient
-                auto F_auxi = F_auxiliary_[element_id][sample_id]; // has been initialized with current q_next
-                Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
-                VectorXr q_pertubated_plus = q_next;
-                q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
-                Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_plus = ScatterToElement(q_pertubated_plus, element_id);
-                Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_plus = ScatterToElementFlattened(q_pertubated_plus, element_id);
-                VectorXr q_pertubated_minus = q_next;
-                q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
-                Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_minus = ScatterToElement(q_pertubated_minus, element_id);
-                Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_minus = ScatterToElementFlattened(q_pertubated_minus, element_id);
-                Eigen::Matrix<real, vertex_dim, vertex_dim> Fst_default = F_auxi.Fst();
-                Eigen::Matrix<real, vertex_dim, vertex_dim> f_default = F_auxi.F();
-                Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat = F_auxi.A(); 
-                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> A_expand; A_expand.setZero();
-                for(int k = 0; k < vertex_dim; ++k){
-                    for(int l = 0; l < vertex_dim; ++l){
-                        // A_expand(k, l) = A_mat(l, k);
-                        // A_expand(k + vertex_dim, l + vertex_dim) = A_mat(l, k);
-                        // A_expand(k + 2 * vertex_dim, l + 2 * vertex_dim) = A_mat(l, k);
-                        A_expand( vertex_dim * k + 0, vertex_dim * l + 0) = A_mat(l, k);    
-                        A_expand( vertex_dim * k + 1, vertex_dim * l + 1) = A_mat(l, k);    
-                        A_expand( vertex_dim * k + 2, vertex_dim * l + 2) = A_mat(l, k);    
+            int controller = 12;
+            for(int i=0; i< controller; i++){
+                int six_controller = i / 2;
+                int remainder = i % 2;
+                int two_controller = remainder % 2;
+                // main loop
+                int element_start = 0;
+                int element_range = 2000;
+                real total_error = 0;
+                for( int element_id = element_start; element_id < element_start + element_range; element_id++){
+                    int sample_id = 5; // 0-7
+                    const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(element_id);
+                    int vertex_id = vi(sample_id);
+                    // get current deformation gradient
+                    auto F_auxi = F_auxiliary_[element_id][sample_id]; // has been initialized with current q_next
+                    Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
+                    VectorXr q_pertubated_plus = q_next;
+                    q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
+                    Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_plus = ScatterToElement(q_pertubated_plus, element_id);
+                    Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_plus = ScatterToElementFlattened(q_pertubated_plus, element_id);
+                    VectorXr q_pertubated_minus = q_next;
+                    q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
+                    Eigen::Matrix<real, vertex_dim, element_dim> q_scatter_minus = ScatterToElement(q_pertubated_minus, element_id);
+                    Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_minus = ScatterToElementFlattened(q_pertubated_minus, element_id);
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> Fst_default = F_auxi.Fst();
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> f_default = F_auxi.F();
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat = F_auxi.A(); 
+                    Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> A_expand; A_expand.setZero();
+                    for(int k = 0; k < vertex_dim; ++k){
+                        for(int l = 0; l < vertex_dim; ++l){
+                            if(two_controller == 0){
+                                A_expand(k, l) = A_mat(l, k);
+                                A_expand(k + vertex_dim, l + vertex_dim) = A_mat(l, k);
+                                A_expand(k + 2 * vertex_dim, l + 2 * vertex_dim) = A_mat(l, k);
+                            } else {
+                                A_expand( vertex_dim * k + 0, vertex_dim * l + 0) = A_mat(l, k);    
+                                A_expand( vertex_dim * k + 1, vertex_dim * l + 1) = A_mat(l, k);    
+                                A_expand( vertex_dim * k + 2, vertex_dim * l + 2) = A_mat(l, k);    
+                            }
+                        }
                     }
-                }
-                Eigen::Matrix<real, vertex_dim, vertex_dim> f_plus = DeformationGradient(element_id, q_scatter_plus, sample_id);
-                Eigen::Matrix<real, vertex_dim, vertex_dim> f_minus = DeformationGradient(element_id, q_scatter_minus, sample_id);
-                Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_diff = q_flatten_plus - q_flatten_minus;
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> f_plus = DeformationGradient(element_id, q_scatter_plus, sample_id);
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> f_minus = DeformationGradient(element_id, q_scatter_minus, sample_id);
+                    Eigen::Matrix<real, vertex_dim * element_dim, 1> q_flatten_diff = q_flatten_plus - q_flatten_minus;
 
-                // F_auxi as f_default and A
-                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * element_dim> Gc = finite_element_samples_[element_id][sample_id].dF_dxkd_flattened();
-                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dRst_dFst_default = dRFromdF(F_auxi.Fst(), F_auxi.Rst(), F_auxi.Sst());
-                Eigen::Matrix<real, vertex_dim * vertex_dim, 1> estiamted_dRst_dq =  dRst_dFst_default * A_expand * Gc * q_flatten_diff; // 9x9 * 9x24 * 24x1
-                // No seriously, I tried these for dRst_dq:
-                   // A_expand with two different order as a few lines above
-                   // A_expand * Gc * A_expand, A_expand * Gc, Gc * A_expand, Gc. And this so far is the only comb that give me -e9 level error, 
-                   // which is about the same as dR_dF
-                F_auxi.Initialize(f_plus, A_mat);
-                Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_plus = F_auxi.Rst();
-                F_auxi.Initialize(f_minus, A_mat);
-                Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_minus = F_auxi.Rst();
-                Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_diff = Rst_plus - Rst_minus;
-                VectorXr Rst_diff_flatten = Eigen::Map<VectorXr>(Rst_diff.data(), vertex_dim * vertex_dim); // col wise
-                bool verbose = false;
-                if(verbose){
-                    std::cout << "Error of dRst_dq: " << abs(estiamted_dRst_dq.norm() - Rst_diff_flatten.norm()) 
-                                << ", with estiamted_dRst_dq.norm() = " << estiamted_dRst_dq.norm() 
-                                << ", Rst_diff_flatten.norm() = " << Rst_diff_flatten.norm()
-                                << std::endl;
-                    std::cout << "dRst_dq non zero check: " << dRst_dFst_default.norm() << std::endl;
+                    // F_auxi as f_default and A
+                    Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * element_dim> Gc = finite_element_samples_[element_id][sample_id].dF_dxkd_flattened();
+                    Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dRst_dFst_default = dRFromdF(F_auxi.Fst(), F_auxi.Rst(), F_auxi.Sst());
+                    Eigen::Matrix<real, vertex_dim * vertex_dim, 1> estiamted_dRst_dq =  dRst_dFst_default * A_expand * Gc * q_flatten_diff; // 9x9 * 9x24 * 24x1
+                    
+                    if(      six_controller == 0){
+                        estiamted_dRst_dq = A_expand * dRst_dFst_default * A_expand * Gc * q_flatten_diff;
+                    }else if(six_controller == 1){
+                        estiamted_dRst_dq = dRst_dFst_default * A_expand * A_expand * Gc * q_flatten_diff;
+                    }else if(six_controller == 2){
+                        estiamted_dRst_dq = A_expand * A_expand * dRst_dFst_default * Gc * q_flatten_diff;
+                    }else if(six_controller == 3){  
+                        estiamted_dRst_dq = dRst_dFst_default * A_expand * Gc * q_flatten_diff;
+                    }else if(six_controller == 4){
+                        estiamted_dRst_dq = A_expand * dRst_dFst_default * Gc * q_flatten_diff;
+                    }else if(six_controller == 5){
+                        estiamted_dRst_dq = dRst_dFst_default * Gc * q_flatten_diff;
+                    }
+                    // No seriously, I tried these for dRst_dq:
+                    // A_expand with two different order as a few lines above
+                    // A_expand * Gc * A_expand, A_expand * Gc, Gc * A_expand, Gc. And this so far is the only comb that give me -e9 level error, 
+                    // which is about the same as dR_dF
+                    F_auxi.Initialize(f_plus, A_mat);
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_plus = F_auxi.Rst();
+                    F_auxi.Initialize(f_minus, A_mat);
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_minus = F_auxi.Rst();
+                    Eigen::Matrix<real, vertex_dim, vertex_dim> Rst_diff = Rst_plus - Rst_minus;
+                    VectorXr Rst_diff_flatten = Eigen::Map<VectorXr>(Rst_diff.data(), vertex_dim * vertex_dim); // col wise
+                    bool verbose = false;
+                    if(verbose){
+                        std::cout << "Error of dRst_dq: " << abs(estiamted_dRst_dq.norm() - Rst_diff_flatten.norm()) 
+                                    << ", with estiamted_dRst_dq.norm() = " << estiamted_dRst_dq.norm() 
+                                    << ", Rst_diff_flatten.norm() = " << Rst_diff_flatten.norm()
+                                    << std::endl;
+                        std::cout << "dRst_dq non zero check: " << dRst_dFst_default.norm() << std::endl;
+                    }
+                    total_error += abs(estiamted_dRst_dq.norm() - Rst_diff_flatten.norm());
                 }
-                total_error += abs(estiamted_dRst_dq.norm() - Rst_diff_flatten.norm());
+                std::cout << "six_controller = " << six_controller << ", remainder = " << remainder << ", two_controller = " << two_controller << std::endl;
+                std::cout << "Avg error of dRst_dq: " << total_error / element_range << std::endl;
+                // six_controller = 0, remainder = 0, two_controller = 0
+                // Avg error of dRst_dq: 7.15113e-05
+                // six_controller = 0, remainder = 1, two_controller = 1
+                // Avg error of dRst_dq: 4.76686e-05
+                // six_controller = 1, remainder = 0, two_controller = 0
+                // Avg error of dRst_dq: 9.63161e-05
+                // six_controller = 1, remainder = 1, two_controller = 1
+                // Avg error of dRst_dq: 6.15487e-05
+                // six_controller = 2, remainder = 0, two_controller = 0
+                // Avg error of dRst_dq: 5.44799e-05
+                // six_controller = 2, remainder = 1, two_controller = 1
+                // Avg error of dRst_dq: 5.1868e-05
+                // six_controller = 3, remainder = 0, two_controller = 0
+                // Avg error of dRst_dq: 5.89349e-05
+                // six_controller = 3, remainder = 1, two_controller = 1
+                // Avg error of dRst_dq: 5.74394e-09
+                // six_controller = 4, remainder = 0, two_controller = 0
+                // Avg error of dRst_dq: 3.15952e-05
+                // six_controller = 4, remainder = 1, two_controller = 1
+                // Avg error of dRst_dq: 3.00405e-05
+                // six_controller = 5, remainder = 0, two_controller = 0
+                // Avg error of dRst_dq: 6.06458e-05
+                // six_controller = 5, remainder = 1, two_controller = 1
+                // Avg error of dRst_dq: 6.06458e-05
             }
-            std::cout << "Avg error of dRst_dq: " << total_error / element_range << std::endl;
         }
         // Compare MatrixOp with w * Gc.T * Gc
         bool check_MatrixOp = false;
@@ -429,7 +558,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
     // gradiant check END
     bool check_secondOrder_hessian = false;
     if(check_secondOrder_hessian){    
-        auto HessAtQ = [&](const VectorXr& q, const VectorXr& act, std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& hess_q){
+        auto HessAtQ = [&](const VectorXr& q, const VectorXr& act, std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& hess_q, int rhs_choice, int transpose_choice, int dR_choice = 0){
             ShapeTargetComputeAuxiliaryDeformationGradient(q, act); // update deformation gradient 
             for (int i = 0; i < element_num; i++) {
                 const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(i);
@@ -442,12 +571,39 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
                     Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> A_expand; A_expand.setZero();
                     for(int k = 0; k < vertex_dim; ++k){
                         for(int l = 0; l < vertex_dim; ++l){
-                            A_expand(k, l) = A_mat(l, k);
-                            A_expand(k + vertex_dim, l + vertex_dim) = A_mat(l, k);
-                            A_expand(k + 2 * vertex_dim, l + 2 * vertex_dim) = A_mat(l, k);
+                            if(transpose_choice == 0){ 
+                                A_expand(k, l) = A_mat(l, k);
+                                A_expand(k + vertex_dim, l + vertex_dim) = A_mat(l, k);
+                                A_expand(k + 2 * vertex_dim, l + 2 * vertex_dim) = A_mat(l, k);
+                            }else if(transpose_choice == 1){
+                                A_expand( vertex_dim * k + 0, vertex_dim * l + 0) = A_mat(l, k);    
+                                A_expand( vertex_dim * k + 1, vertex_dim * l + 1) = A_mat(l, k);    
+                                A_expand( vertex_dim * k + 2, vertex_dim * l + 2) = A_mat(l, k);   
+                            }
                         }
                     }
-                    hess_local += w_ * Gc.transpose() * (Gc - A_expand * dR_dF * A_expand * Gc); // w * Gc.T *(Gc - A_expand * dR_dF * A_expand * Gc)
+                    if(dR_choice == 0){
+                        
+                    }else if(dR_choice == 1){
+                        dR_dF = dR_dF.transpose();
+                    }
+
+
+                    Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * element_dim> rhs; rhs.setZero();
+                    if(rhs_choice == 0){
+                        rhs = A_expand * dR_dF * A_expand * Gc;
+                    }else if(rhs_choice == 1){
+                        rhs = dR_dF * A_expand * A_expand * Gc;
+                    }else if(rhs_choice == 2){
+                        rhs = A_expand * A_expand * dR_dF * Gc;
+                    }else if(rhs_choice == 3){
+                        rhs = dR_dF * A_expand * Gc;
+                    }else if(rhs_choice == 4){
+                        rhs = A_expand * dR_dF * Gc;
+                    }else if(rhs_choice == 5){
+                        rhs = dR_dF * Gc;
+                    }
+                    hess_local += w_ * Gc.transpose() * (Gc - rhs); // w * Gc.T *(Gc - A_expand * dR_dF * A_expand * Gc)
                 }
                 hess_q[i] = hess_local;
             }
@@ -556,60 +712,128 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         // 3. pertubate it by delta_xyz compute the force_1 (a new 3x1), then pertubate it by -delta_xyz compute the forc2 (another new 3x1)
         // 4. Use 2 * delta_xyz and multiply default hessian, add up the relevant entries from the 3x8 matrix to get the estimated force
         // 5. Compare the estimated force with the difference of force_1 and force_2
-        int vertex_count = mesh_.NumOfVertices();
-        int non_zero_entry_count_diff = 0;
-        real total_error = 0;
-        real total_relative_error = 0;
-        for(int vertex_id = 0; vertex_id < vertex_count; ++vertex_id){
-            Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
-            std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>> hess_at_q;
-            hess_at_q.resize(element_num);
-            VectorXr q_pertubated_plus = q_next;
-            q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
-            VectorXr q_pertubated_minus = q_next;
-            q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
 
-            HessAtQ(q_next, act, hess_at_q);
-            ShapeTargetComputeAuxiliaryDeformationGradient(q_pertubated_plus, act);
-            auto force_q_plus = ShapeTargetingForce(q_pertubated_plus, act);
-            ShapeTargetComputeAuxiliaryDeformationGradient(q_pertubated_minus, act);
-            auto force_q_minus = ShapeTargetingForce(q_pertubated_minus, act);
-            auto force_diff = force_q_plus - force_q_minus;
-            auto force_delta = q_pertubated_plus - q_pertubated_minus;
-            // multiply hess_at_q with 2 * delta_xyz
-            auto estimated_force = ApplyHessToQ(force_delta, hess_at_q);
-            // get the nonzero entrie
-            std::vector<real> non_zero_entries_of_force_diff;
-            std::vector<real> non_zero_entries_of_estimated_force;
-            int count_force_non_zero = 0;
-            int count_estimated_force_non_zero = 0;
-            for(int i = 0; i < dofs_ / 3; ++i){
-                if(force_diff(3 * i) != 0 || force_diff(3 * i + 1) != 0 || force_diff(3 * i + 2) != 0){
-                    non_zero_entries_of_force_diff.push_back(force_diff(3 * i));
-                    non_zero_entries_of_force_diff.push_back(force_diff(3 * i + 1));
-                    non_zero_entries_of_force_diff.push_back(force_diff(3 * i + 2));
-                    count_force_non_zero++;
-                } 
-                if(estimated_force(3 * i) != 0 || estimated_force(3 * i + 1) != 0 || estimated_force(3 * i + 2) != 0){
-                    non_zero_entries_of_estimated_force.push_back(estimated_force(3 * i));
-                    non_zero_entries_of_estimated_force.push_back(estimated_force(3 * i + 1));
-                    non_zero_entries_of_estimated_force.push_back(estimated_force(3 * i + 2));
-                    count_estimated_force_non_zero++;
+        int controller = 24;
+        for(int i = 0; i < controller; ++i){
+            // divide into 6, 2, 2 options
+            int six_choice = i / 4;
+            int remainder = i % 4;
+            int first_two_choice = remainder / 2;
+            int last_two_choice = remainder % 2;
+            
+            // main loop
+            int vertex_start = 800;
+            int vertex_range = 100;
+            int non_zero_entry_count_diff = 0;
+            real total_error = 0;
+            real total_relative_error = 0;
+            for(int vertex_id = vertex_start; vertex_id < vertex_start + vertex_range ; ++vertex_id){
+                Eigen::Matrix<real, vertex_dim, 1> delta_xyz = Eigen::Matrix<real, vertex_dim, 1>::Ones() * eps;
+                std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>> hess_at_q;
+                hess_at_q.resize(element_num);
+                VectorXr q_pertubated_plus = q_next;
+                q_pertubated_plus.segment(vertex_dim * vertex_id, vertex_dim) += delta_xyz;
+                VectorXr q_pertubated_minus = q_next;
+                q_pertubated_minus.segment(vertex_dim * vertex_id, vertex_dim) -= delta_xyz;
+                // compute hessian at q and store to hess_at_q
+                HessAtQ(q_next, act, hess_at_q, six_choice, first_two_choice, last_two_choice);
+                // use default approach and store to dA
+                std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>> dA;
+                ShapeTargetComputeAuxiliaryDeformationGradient(q_next, act);
+                SetupShapeTargetingLocalStepDifferential(q_next, act, dA);
+
+                ShapeTargetComputeAuxiliaryDeformationGradient(q_pertubated_plus, act);
+                auto force_q_plus = ShapeTargetingForce(q_pertubated_plus, act);
+                ShapeTargetComputeAuxiliaryDeformationGradient(q_pertubated_minus, act);
+                auto force_q_minus = ShapeTargetingForce(q_pertubated_minus, act);
+                auto force_diff = force_q_plus - force_q_minus;
+                auto q_delta = q_pertubated_plus - q_pertubated_minus;
+                // multiply hess_at_q with 2 * delta_xyz
+                auto estimated_force = ApplyHessToQ(q_delta, hess_at_q);
+                auto estimated_force_2 = PdLhsMatrixOp(q_delta, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_delta, act, dA, q_delta);
+                // std::cout << "hessian q diff = " << (estimated_force - estimated_force_2).norm() << std::endl;
+
+                // get the nonzero entries
+                std::vector<real> non_zero_entries_of_force_diff;
+                std::vector<real> non_zero_entries_of_estimated_force;
+                int count_force_non_zero = 0;
+                int count_estimated_force_non_zero = 0;
+                for(int i = 0; i < dofs_ / 3; ++i){
+                    if(force_diff(3 * i) != 0 || force_diff(3 * i + 1) != 0 || force_diff(3 * i + 2) != 0){
+                        non_zero_entries_of_force_diff.push_back(force_diff(3 * i));
+                        non_zero_entries_of_force_diff.push_back(force_diff(3 * i + 1));
+                        non_zero_entries_of_force_diff.push_back(force_diff(3 * i + 2));
+                        count_force_non_zero++;
+                    } 
+                    if(estimated_force(3 * i) != 0 || estimated_force(3 * i + 1) != 0 || estimated_force(3 * i + 2) != 0){
+                        non_zero_entries_of_estimated_force.push_back(estimated_force(3 * i));
+                        non_zero_entries_of_estimated_force.push_back(estimated_force(3 * i + 1));
+                        non_zero_entries_of_estimated_force.push_back(estimated_force(3 * i + 2));
+                        count_estimated_force_non_zero++;
+                    }
+                        
                 }
-                    
+                // std::cout << "count_force_non_zero = " << count_force_non_zero << ", count_estimated_force_non_zero = " << count_estimated_force_non_zero << std::endl;
+                // std::cout << "force_diff = " << force_diff.norm() << ", estimated_force = " << estimated_force.norm() << std::endl;
+                total_error += abs(force_diff.norm() - estimated_force.norm());
+                total_relative_error += abs(force_diff.norm() - estimated_force.norm()) / force_diff.norm();
+                if (count_force_non_zero != count_estimated_force_non_zero){
+                    non_zero_entry_count_diff++;
+                }
+                // std::cout << "vertex_id = " << vertex_id << ", running avg error = " << total_error / (vertex_id + 1) << ", running avg relative error = " << total_relative_error / (vertex_id + 1) << std::endl;
             }
-            // std::cout << "count_force_non_zero = " << count_force_non_zero << ", count_estimated_force_non_zero = " << count_estimated_force_non_zero << std::endl;
-            // std::cout << "force_diff = " << force_diff.norm() << ", estimated_force = " << estimated_force.norm() << std::endl;
-            total_error += abs(force_diff.norm() - estimated_force.norm());
-            total_relative_error += abs(force_diff.norm() - estimated_force.norm()) / force_diff.norm();
-            if (count_force_non_zero != count_estimated_force_non_zero){
-                non_zero_entry_count_diff++;
-            }
-            std::cout << "vertex_id = " << vertex_id << ", running avg error = " << total_error / (vertex_id + 1) << ", running avg relative error = " << total_relative_error / (vertex_id + 1) << std::endl;
+            std::cout << "i = " << i << ", six_choice = " << six_choice << ", first_two_choice = " << first_two_choice << ", last_two_choice = " << last_two_choice << std::endl;
+            std::cout << "avg error = " << total_error / vertex_range << std::endl;
+
+            // i = 0, six_choice = 0, first_two_choice = 0, last_two_choice = 0
+            // avg error = 1.45117e-07
+            // i = 1, six_choice = 0, first_two_choice = 0, last_two_choice = 1
+            // avg error = 1.45117e-07
+            // i = 2, six_choice = 0, first_two_choice = 1, last_two_choice = 0
+            // avg error = 7.2019e-13
+            // i = 3, six_choice = 0, first_two_choice = 1, last_two_choice = 1
+            // avg error = 7.2019e-13
+            // i = 4, six_choice = 1, first_two_choice = 0, last_two_choice = 0
+            // avg error = 1.28733e-07
+            // i = 5, six_choice = 1, first_two_choice = 0, last_two_choice = 1
+            // avg error = 1.28733e-07
+            // i = 6, six_choice = 1, first_two_choice = 1, last_two_choice = 0
+            // avg error = 1.50742e-08
+            // i = 7, six_choice = 1, first_two_choice = 1, last_two_choice = 1
+            // avg error = 1.50742e-08
+            // i = 8, six_choice = 2, first_two_choice = 0, last_two_choice = 0
+            // avg error = 1.62119e-07
+            // i = 9, six_choice = 2, first_two_choice = 0, last_two_choice = 1
+            // avg error = 1.62119e-07
+            // i = 10, six_choice = 2, first_two_choice = 1, last_two_choice = 0
+            // avg error = 1.47231e-08
+            // i = 11, six_choice = 2, first_two_choice = 1, last_two_choice = 1
+            // avg error = 1.47231e-08
+            // i = 12, six_choice = 3, first_two_choice = 0, last_two_choice = 0
+            // avg error = 1.09178e-07
+            // i = 13, six_choice = 3, first_two_choice = 0, last_two_choice = 1
+            // avg error = 1.09178e-07
+            // i = 14, six_choice = 3, first_two_choice = 1, last_two_choice = 0
+            // avg error = 7.08529e-08
+            // i = 15, six_choice = 3, first_two_choice = 1, last_two_choice = 1
+            // avg error = 7.08529e-08
+            // i = 16, six_choice = 4, first_two_choice = 0, last_two_choice = 0
+            // avg error = 1.23798e-07
+            // i = 17, six_choice = 4, first_two_choice = 0, last_two_choice = 1
+            // avg error = 1.23798e-07
+            // i = 18, six_choice = 4, first_two_choice = 1, last_two_choice = 0
+            // avg error = 6.30666e-08
+            // i = 19, six_choice = 4, first_two_choice = 1, last_two_choice = 1
+            // avg error = 6.30666e-08
+            // i = 20, six_choice = 5, first_two_choice = 0, last_two_choice = 0
+            // avg error = 1.32326e-07
+            // i = 21, six_choice = 5, first_two_choice = 0, last_two_choice = 1
+            // avg error = 1.32326e-07
+            // i = 22, six_choice = 5, first_two_choice = 1, last_two_choice = 0
+            // avg error = 1.32326e-07
+            // i = 23, six_choice = 5, first_two_choice = 1, last_two_choice = 1
+            // avg error = 1.32326e-07
         }
-        std::cout << "avg error = " << total_error / vertex_count << std::endl;
-        std::cout << "non_zero_entry_count_diff = " << non_zero_entry_count_diff << std::endl;
-        return;
     }
 }
 
