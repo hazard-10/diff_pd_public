@@ -228,7 +228,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         }; 
 
     // first test first order gradient
-    bool check_firstOrder_gradient = true;
+    bool check_firstOrder_gradient = false;
     if(check_firstOrder_gradient){
         // first order gradient check. Alread passed
         bool check_dE_dq = false;
@@ -556,7 +556,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         }
     }
     // gradiant check END
-    bool check_secondOrder_hessian = false;
+    bool check_secondOrder_hessian = true;
     if(check_secondOrder_hessian){    
         auto HessAtQ = [&](const VectorXr& q, const VectorXr& act, std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>>& hess_q, int rhs_choice, int transpose_choice, int dR_choice = 0){
             ShapeTargetComputeAuxiliaryDeformationGradient(q, act); // update deformation gradient 
@@ -714,7 +714,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
         // 5. Compare the estimated force with the difference of force_1 and force_2
 
         int controller = 24;
-        for(int i = 0; i < controller; ++i){
+        for(int i = 2 ; i < 3; ++i){
             // divide into 6, 2, 2 options
             int six_choice = i / 4;
             int remainder = i % 4;
@@ -723,7 +723,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
             
             // main loop
             int vertex_start = 800;
-            int vertex_range = 100;
+            int vertex_range = 20;
             int non_zero_entry_count_diff = 0;
             real total_error = 0;
             real total_relative_error = 0;
@@ -751,7 +751,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
                 // multiply hess_at_q with 2 * delta_xyz
                 auto estimated_force = ApplyHessToQ(q_delta, hess_at_q);
                 auto estimated_force_2 = PdLhsMatrixOp(q_delta, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_delta, act, dA, q_delta);
-                // std::cout << "hessian q diff = " << (estimated_force - estimated_force_2).norm() << std::endl;
+                std::cout << "diff w backward() = " << (estimated_force - estimated_force_2).norm() << std::endl;
 
                 // get the nonzero entries
                 std::vector<real> non_zero_entries_of_force_diff;
@@ -782,8 +782,8 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetGradientCheck(const VectorX
                 }
                 // std::cout << "vertex_id = " << vertex_id << ", running avg error = " << total_error / (vertex_id + 1) << ", running avg relative error = " << total_relative_error / (vertex_id + 1) << std::endl;
             }
-            std::cout << "i = " << i << ", six_choice = " << six_choice << ", first_two_choice = " << first_two_choice << ", last_two_choice = " << last_two_choice << std::endl;
-            std::cout << "avg error = " << total_error / vertex_range << std::endl;
+            // std::cout << "i = " << i << ", six_choice = " << six_choice << ", first_two_choice = " << first_two_choice << ", last_two_choice = " << last_two_choice << std::endl;
+            // std::cout << "avg error = " << total_error / vertex_range << std::endl;
 
             // i = 0, six_choice = 0, first_two_choice = 0, last_two_choice = 0
             // avg error = 1.45117e-07

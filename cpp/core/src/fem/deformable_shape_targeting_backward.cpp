@@ -47,31 +47,6 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingLocalStepDifferenti
     // if use_FA_not_F, then dA = w * Gc.T * act * Hess_rot_AF * act * Gc
     // if Not,          then dA = w * Gc.T * act * Hess_rot_F * Gc
 
-    auto rotationGradiant = [&](const DeformationGradientAuxiliaryData<vertex_dim>& F){
-        // following code compute with SVD of St version in aux data
-        const Eigen::Matrix<real, vertex_dim, 1>& sig = F.sigst();
-
-        real lambda0 = 2 / (sig(0) + sig(1));
-        real lambda1 = 2 / (sig(1) + sig(2));
-        real lambda2 = 2 / (sig(0) + sig(2));
-
-        Eigen::Matrix<real, vertex_dim, vertex_dim> q_0 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, -1, 0, 1, 0, 0, 0, 0, 0).finished();
-        Eigen::Matrix<real, vertex_dim, vertex_dim> q_1 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, 0, 0, 0, 0, 1, 0, -1, 0).finished();
-        Eigen::Matrix<real, vertex_dim, vertex_dim> q_2 = (Eigen::Matrix<real, vertex_dim, vertex_dim>() << 0, 0, 1, 0, 0, 0, -1, 0, 0).finished();
-        Eigen::Matrix<real, vertex_dim, vertex_dim> Q0 = (1/sqrt(2)) * F.Ust() * q_0 * F.Vst().transpose();
-        Eigen::Matrix<real, vertex_dim, vertex_dim> Q1 = (1/sqrt(2)) * F.Ust() * q_1 * F.Vst().transpose();
-        Eigen::Matrix<real, vertex_dim, vertex_dim> Q2 = (1/sqrt(2)) * F.Ust() * q_2 * F.Vst().transpose();
-
-        Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ0 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q0.data(), vertex_dim*vertex_dim, 1);
-        Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ1 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q1.data(), vertex_dim*vertex_dim, 1);
-        Eigen::Matrix<real, vertex_dim*vertex_dim, 1> vecQ2 = Eigen::Map<Eigen::Matrix<real, vertex_dim*vertex_dim, 1>>(Q2.data(), vertex_dim*vertex_dim, 1);
-        
-        Eigen::Matrix<real, vertex_dim*vertex_dim, vertex_dim*vertex_dim> dR_dF = (lambda0 * vecQ0 * vecQ0.transpose() + 
-                                            lambda1 * vecQ1 * vecQ1.transpose() + 
-                                            lambda2 * vecQ2 * vecQ2.transpose());
-        return dR_dF;
-    };
-
     dA.resize(element_num);
     // #pragma omp parallel for
     for (int i = 0; i < element_num; i++) {
@@ -79,15 +54,20 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingLocalStepDifferenti
         for (int j = 0; j < sample_num; ++j) {
             DeformationGradientAuxiliaryData<vertex_dim>& F = F_auxiliary_[i][j];
             Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat = F.A();
+            Eigen::Matrix<real, vertex_dim, vertex_dim> Rst = F.Rst();
             Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> A_expand; A_expand.setZero();
             CheckError(vertex_dim == 3, "Only 3d is supported in shape targeting now");
-            A_expand.block(0, 0, vertex_dim, vertex_dim).noalias() = A_mat;
-            A_expand.block(3, 3, vertex_dim, vertex_dim).noalias() = A_mat;
-            A_expand.block(6, 6, vertex_dim, vertex_dim).noalias() = A_mat;
- 
-            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = rotationGradiant(F);
+            for(int k = 0; k < vertex_dim; ++k){
+                for(int l = 0; l < vertex_dim; ++l){
+                    A_expand( vertex_dim * k + 0, vertex_dim * l + 0) = A_mat(l, k);    
+                    A_expand( vertex_dim * k + 1, vertex_dim * l + 1) = A_mat(l, k);    
+                    A_expand( vertex_dim * k + 2, vertex_dim * l + 2) = A_mat(l, k);    
+                }
+            } 
+            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F.Fst(), F.Rst(), F.Sst());
 
-            w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF * A_expand * finite_element_samples_[i][j].pd_A();             
+            w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF * A_expand * finite_element_samples_[i][j].pd_A();     
+            //                      24x9 * 9x9 * 9x9 * 9x9 * 9x24 : 24x24        
         }
         dA[i] = w_GT_A_HrAF_A_G;
     }
@@ -105,7 +85,7 @@ const VectorXr Deformable<vertex_dim, element_dim>::ApplyShapeTargetingLocalStep
     for (int i = 0; i < element_num; ++i) {
         const auto ddeformed = ScatterToElementFlattened(Z, i);
         const Eigen::Matrix<int, element_dim, 1> vi = mesh_.element(i);
-        const Eigen::Matrix<real, vertex_dim * element_dim, 1> da_z_ele = dA[i] * ddeformed;
+        const Eigen::Matrix<real, vertex_dim * element_dim, 1> da_z_ele = dA[i] * ddeformed; // 24x24 * 24x1 = 24x1
         for (int k = 0; k < element_dim; ++k)
             dA_Z.segment(vertex_dim * vi(k), vertex_dim) += da_z_ele.segment(k * vertex_dim, vertex_dim);
     }     
@@ -141,9 +121,6 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
                                       // only has one energy, the size is 1
     dl_dact_w = VectorXr::Zero(1); // will delete this later
 
-    // todo：initialize local muscle / element matrices in setupShapeTargetingLocalStepDifferential
-    // line 182 - 192 in pd_backward function
-
     std::vector<Eigen::Matrix<real, vertex_dim * element_dim, vertex_dim * element_dim>> dA;
     ShapeTargetComputeAuxiliaryDeformationGradient(q_next, act);
     SetupShapeTargetingLocalStepDifferential(q_next, act, dA);
@@ -164,36 +141,19 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     VectorXr grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();
     real obj_sol = 0.5 * Z.dot(hessian_q_Z) - dl_dq_next_agg.dot(Z);
 
+    // do a gradient check
+    bool grad_check = false;
+    if (grad_check){
+        ShapeTargetGradientCheck(q_next, act, dA);
+        return;
+    }
 
     // prepare for PD backward iteration
     // 1. compute hessian_q_Z = A * Z - ΔA * Z 
     bool success = false; 
+    int iter_num = 200000;
 
-    int iter_num = 8;
-    // // conventional pd backward 
-    // Z = VectorXr::Zero(dofs_);
-    // selected = VectorXr::Ones(dofs_);
-    // for (const auto& pair : augmented_dirichlet) {
-    //     Z(pair.first) = 0;
-    //     selected(pair.first) = 0;
-    // }
-    // hessian_q_Z = PdLhsMatrixOp(Z, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
-    // grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();
-    // obj_sol = 0.5 * Z.dot(hessian_q_Z) - dl_dq_next_agg.dot(Z);
-    // for(int i = 0; i < iter_num; ++i){ // diffpd
-    //     const VectorXr b = (dl_dq_next_agg + ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z)).array() * selected.array();
-    //     // Global step:
-    //     Z = (PdLhsSolve(method, b, augmented_dirichlet, use_acc, use_sparse).array() * selected.array());
-    //     hessian_q_Z = PdLhsMatrixOp(Z, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
-    //     grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();   
-    //     if (verbose_level > 1){ 
-    //         std::cout << ", abs_error = " << grad_sol.norm()
-    //                 << ", iter " << i
-    //                 << std::endl;
-    //     }
-    // }
-
-    // now do the 2021 paper version    
+    // conventional pd backward 
     Z = VectorXr::Zero(dofs_);
     selected = VectorXr::Ones(dofs_);
     for (const auto& pair : augmented_dirichlet) {
@@ -202,21 +162,45 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     }
     hessian_q_Z = PdLhsMatrixOp(Z, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
     grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();
-    obj_sol = 0.5 * Z.dot(hessian_q_Z) - dl_dq_next_agg.dot(Z); 
-    for(int i = 0; i < iter_num; ++i){ // 2021 paper
+    obj_sol = 0.5 * Z.dot(hessian_q_Z) - dl_dq_next_agg.dot(Z);
+    for(int i = 0; i < iter_num; ++i){ // diffpd
+        const VectorXr b = (dl_dq_next_agg + ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z)).array() * selected.array();
+        // Global step:
+        Z = (PdLhsSolve(method, b, augmented_dirichlet, use_acc, use_sparse).array() * selected.array());
         hessian_q_Z = PdLhsMatrixOp(Z, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
-        const VectorXr r = dl_dq_next_agg - hessian_q_Z;
-        VectorXr dZ = PdLhsSolve(method, r, augmented_dirichlet, use_acc, use_sparse);
-        // if (verbose_level > 1) std::cout << "iter " << j << " dZ.norm() = " << dZ.norm() << std::endl;
-        Z += dZ;
-        grad_sol = r.array() * selected.array();  
+        grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();   
         if (verbose_level > 1){ 
             std::cout << ", abs_error = " << grad_sol.norm()
                     << ", iter " << i
                     << std::endl;
         }
     }
-    success = true;
+
+    // // now do the 2021 paper version    
+    // Z = VectorXr::Zero(dofs_);
+    // selected = VectorXr::Ones(dofs_);
+    // for (const auto& pair : augmented_dirichlet) {
+    //     Z(pair.first) = 0;
+    //     selected(pair.first) = 0;
+    // }
+    // hessian_q_Z = PdLhsMatrixOp(Z, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
+    // // hessian_q_Z = analyticalHess(q_next);
+    // grad_sol = (hessian_q_Z - dl_dq_next_agg).array() * selected.array();
+    // obj_sol = 0.5 * Z.dot(hessian_q_Z) - dl_dq_next_agg.dot(Z); 
+    // for(int i = 0; i < iter_num; ++i){ // 2021 paper
+    //     hessian_q_Z = PdLhsMatrixOp(Z, augmented_dirichlet) - ApplyShapeTargetingLocalStepDifferential(q_next, act, dA, Z);
+    //     // hessian_q_Z = analyticalHess(q_next);
+    //     const VectorXr r = dl_dq_next_agg - hessian_q_Z;
+    //     VectorXr dZ = PdLhsSolve(method, r, augmented_dirichlet, use_acc, use_sparse);
+    //     // if (verbose_level > 1) std::cout << "iter " << j << " dZ.norm() = " << dZ.norm() << std::endl;
+    //     Z += dZ;
+    //     grad_sol = r.array() * selected.array();  
+    //     if (verbose_level > 1){ 
+    //         std::cout << "abs_error = " << grad_sol.norm()
+    //                 << ", iter " << i
+    //                 << std::endl;
+    //     }
+    // }
 
     // next is bfgs    
     // Z = VectorXr::Zero(dofs_);
@@ -234,7 +218,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     std::deque<VectorXr> yi_history, gi_history;
     for (int i = 0; i < max_pd_iter; ++i) {
         if (verbose_level > 0) PrintInfo("PD backward iteration: " + std::to_string(i));
-        if (false){
+        if (use_bfgs){
             VectorXr quasi_newton_direction = VectorXr::Zero(dofs_);
             const int bfgs_size = static_cast<int>(xi_history.size());
             if (bfgs_size == 0) {
@@ -369,7 +353,7 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingBackward(const VectorXr&
     }
     dl_drhs_intermediate = Z;
     if (!success) { 
-        PrintError("PD Shape Targeting backward: switching to Cholesky decomposition");
+        PrintWarning("PD Shape Targeting backward: switching to Cholesky decomposition");
         Eigen::SimplicialLDLT<SparseMatrix> cholesky;
         // const SparseMatrix op = NewtonMatrix(q_next, musc_act, inv_h2m, augmented_dirichlet, use_precomputed_data)
         SparseMatrix hessian_q_og;
