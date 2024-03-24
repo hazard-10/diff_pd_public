@@ -156,7 +156,7 @@ def get_loss(q_curr_np, q_ideal_np):
     l1_mean = np.mean(np.abs(q_curr_np - q_ideal_np))
     print("l2_loss:", l2_loss)
     print("l1_mean:", l1_mean)
-    return 2 * (q_curr_np - q_ideal_np), l2_loss
+    return 2 * (q_ideal_np - q_curr_np), l2_loss
 
 def visualize(q_curr_np, name):
     png_file = output_folder / f'{name}.png'
