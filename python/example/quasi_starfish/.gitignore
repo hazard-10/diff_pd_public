@@ -3,3 +3,5 @@ ground_truth_corotate_only/
 ground_truth_corotate_volume/
 hex_to_one.json
 one_to_hex.json
+stretched_gt_corotate_volume/
+ground_truth/

@@ -194,6 +194,7 @@ public:
     void SetShapeTargetStiffness(const real stiffness) { shape_target_stiffness_ = stiffness; }
 
     real shape_target_stiffness_ = 344827.586  ; //  used 2 * mu, mu defined in .py same as routingTendon
+    void SetupProjectiveDynamicsSolver(const std::string& method, const real dt, const std::map<std::string, real>& options) const;
     
 
 protected:
@@ -261,7 +262,6 @@ private:
     const VectorXr QuasiStaticMatrixOp(const VectorXr& q, const VectorXr& a, const VectorXr& dq) const;
     const SparseMatrix QuasiStaticMatrix(const VectorXr& q, const VectorXr& a) const;
 
-    void SetupProjectiveDynamicsSolver(const std::string& method, const real dt, const std::map<std::string, real>& options) const;
     const VectorXr ProjectiveDynamicsLocalStep(const VectorXr& q_cur, const VectorXr& a_cur,
         const std::map<int, real>& dirichlet_with_friction) const;
 

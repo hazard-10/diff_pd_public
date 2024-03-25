@@ -24,10 +24,12 @@
 //        solver_ready_: bool, if the solver is ready
 template<int vertex_dim, int element_dim>
 void Deformable<vertex_dim, element_dim>::SetupShapeTargetingSolver(const std::map<std::string, real>& options) const{
+    // std::cout << "SetupShapeTargetingSolver. Is solver ready? " << pd_solver_ready_ << std::endl;
     if (pd_solver_ready_) return; // only setup once
     CheckError(options.find("thread_ct") != options.end(), "Missing parameter thread_ct.");
     const int thread_ct = static_cast<int>(options.at("thread_ct"));
     omp_set_num_threads(thread_ct);
+    const std::string method = "pd_eigen";
 
     // inv_h2m + w_i * S'A'AS + w_i * S'A'M'MAS.
     // Assemble and pre-factorize the left-hand-side matrix.
@@ -39,7 +41,11 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingSolver(const std::m
                                                         // vector size is vertex_num
                                                         // triplets are (i, i, value). Value is used for A matrix
     // Part I: Add inv_h2m.
-    // removed because quasistatic simulation doesn't involve mass nor acceleration
+    for (int k = 0; k < vertex_dim; ++k) {
+        for (int i = 0; i < vertex_num; ++i) { 
+            nonzeros[k].push_back(Eigen::Triplet<real>(i, i, 1)); 
+        }
+    }
     
     // Part II: PD element energy: w_i * S'A'AS.
     // TODO: define energy
@@ -77,6 +83,30 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingSolver(const std::m
         CheckError(pd_eigen_solver_[i].info() == Eigen::Success, "Cholesky solver failed to factorize the matrix.");
     }
     
+    // Collision.
+    // Acc_.
+    const int C_num = static_cast<int>(frictional_boundary_vertex_indices_.size());
+    #pragma omp parallel for
+    for (int i = 0; i < vertex_dim; ++i) {
+        Acc_[i] = MatrixXr::Zero(C_num, C_num);
+        for (const auto& pair_row : frictional_boundary_vertex_indices_) {
+            for (const auto& pair_col : frictional_boundary_vertex_indices_) {
+                Acc_[i](pair_row.second, pair_col.second) = pd_lhs_[i].coeff(pair_row.first, pair_col.first);
+            }
+        }
+    }
+
+    // AinvIc_.
+    #pragma omp parallel for
+    for (int d = 0; d < vertex_dim; ++d) {
+        AinvIc_[d] = MatrixXr::Zero(dofs_, C_num);
+        for (const auto& pair : frictional_boundary_vertex_indices_) {
+            VectorXr ej = VectorXr::Zero(vertex_num);
+            ej(pair.first) = 1;
+            if (BeginsWith(method, "pd_eigen")) AinvIc_[d].col(pair.second) = pd_eigen_solver_[d].solve(ej);
+            else if (BeginsWith(method, "pd_pardiso")) AinvIc_[d].col(pair.second) = pd_pardiso_solver_[d].Solve(ej);
+        }
+    }
     pd_solver_ready_ = true;
 }
 
