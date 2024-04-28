@@ -3,8 +3,8 @@
 This is an unofficial implementation of the paper 
 [Learning active quasistatic physics-based models from data](https://pages.cs.wisc.edu/~qisiw/SIG.html) by Srinivasan et al, Siggraph 2021.
 
-![hex demo]('./readme/hex.gif')
-![default demo]('./readme/default.gif')
+<img src="./readme/hex.gif" width="300" height="300" alt="hex demo">
+<img src="./readme/default.gif" width="300" height="300" alt="default demo">
 
 ## 1. Overview
 The pipeline of the paper includes two modules, an autoencoder and a quasistatic differentiable softbody simulator. The simulator is integrated as the final layer into the netowork. 
