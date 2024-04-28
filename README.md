@@ -3,8 +3,7 @@
 This is an unofficial implementation of the paper 
 [Learning active quasistatic physics-based models from data](https://pages.cs.wisc.edu/~qisiw/SIG.html) by Srinivasan et al, Siggraph 2021.
 
-<img src="./readme/hex.gif" width="300" height="300" alt="hex demo">
-<img src="./readme/default.gif" width="300" height="300" alt="default demo">
+<img src="./readme/default_2.gif" width="640" height="360" alt="hex demo"> 
 
 ## 1. Overview
 The pipeline of the paper includes two modules, an autoencoder and a quasistatic differentiable softbody simulator. The simulator is integrated as the final layer into the netowork. 
@@ -18,12 +17,13 @@ The solver code is adapted from [Differentiable projective dynamics](https://git
 > What this repo implemented
 * Core solver's forward and backward pass using shape targeting
 * Attaching 'zero-rest-length' springs as initialization mentioned in Sec 5.1.
-Which you will find in utility_starfish.ipynb
+Which you will find in `python/example/utility_starfish.ipynb`
 * support for dirichlet boundaries, useful for regions closesly related to bone movements.
 * numerical checks for the solver
 
 > What is different, but still works
 * Used hexadralization instead of tetrahedralization, conforming to Yang et al. 2022
+* The repo didin't construct the hexahedrals from BCC lattices. But directly gnerated a voxelized mesh then find the correspondance by shortest distance between trimesh vertices and hexa volume centers. Will update to lattice method in the future.
 
 > What is missing
 * Paper used mutliple simulation instance during training to speed up (when you have a batch size of 8, you will need 8 instances to handle simulation). I don't have any clues on how to implement that on a single computer with the diffpd architecture. Any hints are welcome.
@@ -38,4 +38,23 @@ Yang et al used a starfish example directly generated from diffpd, which I could
 Please refer to diff-pd installation guide [here](https://github.com/mit-gfx/diff_pd_public/tree/master)
 
 ## 4. How to Run
-[wip]
+To get the simulation running properly, you need to obtain these
+1. A sequence of soft body simulation that contains vertices positions.
+2. From the given sequence, pick a rest pose, voxelize or tetrahedralize it, obtain the simulation mesh. 
+3. Construct a barycentric or trilinear mapping between tri-mesh and simulation mesh.
+
+For 2 and 3 You may find utility_starfish.ipynb helpful.
+
+### 4.1 Simulation Demo
+After installing all components and obtaining a decent dataset, you can change the paths in `quasi_starfish.py` under `./python/example`. By the default the script will run the forward and backward simulation (no VAEs) and try to optimize the shape target muscle actuation matrices.
+
+### 4.2 Full pipeline
+You may find vae_train_with_sim.py and similar scripts that integrate the simulation layer into VAEs. Usage should be straighforward after you familarize yourself with simulatoin
+
+## 5. Code structure
+All solver code is in `cpp/`. I directly hardcode shape targeting into `Deformable` class, since none of the existing `energy` class can be easily expanded to accomodate the new formulation. The main components are in
+* `deformable_shape_targeting_backward.cpp`
+* `deformable_shape_targeting_forward.cpp`
+
+and I added pretty extensive gradient check in `deformable_shape_target_gradient_check.cpp`
+which maybe called during backward pass for sanity check.
