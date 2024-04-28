@@ -56,6 +56,26 @@ void Mesh<vertex_dim, element_dim>::Initialize(const Eigen::Matrix<real, vertex_
 }
 
 template<int vertex_dim, int element_dim>
+void Mesh<vertex_dim, element_dim>::PyInitialize(const std::vector<real>& vertices, const std::vector<int>& elements) {
+    const int vertex_num = static_cast<int>(vertices.size()) / vertex_dim;
+    const int element_num = static_cast<int>(elements.size()) / element_dim;
+    Eigen::Matrix<real, vertex_dim, -1> vertices_mat(vertex_dim, vertex_num);
+    Eigen::Matrix<int, element_dim, -1> elements_mat(element_dim, element_num);
+    for (int i = 0; i < vertex_num; ++i) {
+        for (int d = 0; d < vertex_dim; ++d) {
+            vertices_mat(d, i) = vertices[i * vertex_dim + d];
+        }
+    }
+    for (int i = 0; i < element_num; ++i) {
+        for (int d = 0; d < element_dim; ++d) {
+            elements_mat(d, i) = elements[i * element_dim + d];
+        }
+    }
+    Initialize(vertices_mat, elements_mat);
+}
+
+
+template<int vertex_dim, int element_dim>
 const real Mesh<vertex_dim, element_dim>::element_volume(const int element_idx) const {
     const int element_num = static_cast<int>(elements_.cols());
     CheckError(0 <= element_idx && element_idx < element_num, "Element index out of range.");

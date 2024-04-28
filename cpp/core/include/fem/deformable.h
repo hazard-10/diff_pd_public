@@ -168,6 +168,7 @@ public:
         const std::vector<real>& dl_dq_next, const std::map<std::string, real>& options,
         std::vector<real>& dl_dq, std::vector<real>& dl_dact, 
         std::vector<real>& dl_dmat_w, std::vector<real>& dl_dact_w) const;
+    void PyShapeTargetForce(const std::vector<real>& q, const std::vector<real>& act, std::vector<real>& force) const;
     // ---forward solver
     void ShapeTargetingForward(const VectorXr& q,  const VectorXr& act,  
         const std::map<std::string, real>& options, VectorXr& q_next ) const;
@@ -194,6 +195,7 @@ public:
     void SetShapeTargetStiffness(const real stiffness) { shape_target_stiffness_ = stiffness; }
 
     real shape_target_stiffness_ = 344827.586  ; //  used 2 * mu, mu defined in .py same as routingTendon
+    bool use_R_not_Rst = false; // use R instead of Rst for shape targeting
     void SetupProjectiveDynamicsSolver(const std::string& method, const real dt, const std::map<std::string, real>& options) const;
     
 

@@ -227,10 +227,8 @@ def get_trilinear_mapping():
     import json
     map_file = Path('quasi_starfish/ground_truth/trilinear_weights.json')
     tri_map = json.load(open(map_file, 'r'))
-    global trilinear_weights_mapping
     trilinear_weights_mapping = tri_map['trilinear_weights_mapping']
     return trilinear_weights_mapping
-
     
 def get_default_surface_verts(target_num):
     import json
@@ -248,138 +246,92 @@ def set_dirichlet_boundary():
         deformable_shapeTarget.SetDirichletBoundaryCondition(3*v+1, q_init_np[3*v+1])
         deformable_shapeTarget.SetDirichletBoundaryCondition(3*v+2, q_init_np[3*v+2])
 
-'''Main Simulation functions'''
-def forward_pass(act, q_curr): 
-    q_next = StdRealVector(0)
-    deformable_shapeTarget.PyShapeTargetingForward(q_curr, act, fw_options, q_next ) 
-    q_next = np.array(q_next)
-    return q_next
+ 
 
-def backward_pass(q_init_np, act_init_np, q_next_np, dl_dq_next):  
-    dl_dq = StdRealVector(10)  
-    dl_dact = StdRealVector(10) 
-    dl_dmat_w = StdRealVector(10) 
-    dl_dact_w = StdRealVector(10) 
-    deformable_shapeTarget.PyShapeTargetingBackward(q_init_np, act_init_np, q_next_np, dl_dq_next, bw_options, dl_dq, dl_dact, dl_dmat_w, dl_dact_w)
-    return np.array(dl_dact)
+def render_cubes(verts_list, element_list, color_list, png_file):
+    options = {
+        'file_name': png_file,
+        'light_map': 'uffizi-large.exr',
+        'sample': 4,
+        'max_depth': 2,
+        'camera_pos': (5, 5, 5),
+        'camera_lookat': (0, 0, 0.1), # roughly the center of starfish obj
+        
+    }
+    renderer = PbrtRenderer(options)
     
-def get_loss(q_curr_np, q_ideal):
-    l2_loss = np.sum((q_curr_np - q_ideal_np)**2)
-    l1_loss = np.mean(np.abs(q_curr_np - q_ideal))
-    print("l2_loss:", l2_loss)
-    print("l1_diff:", l1_loss)
-    return 2 * (q_curr_np - q_ideal_np), l2_loss
+    element_count = len(element_list)
+    for i in range(element_count):
+        v_l = verts_list[i]
+        el = element_list[i]
+        mesh = HexMesh3d()
+        mesh.PyInitialize(v_l, el)  
+        renderer.add_hex_mesh(mesh, render_voxel_edge=False, color=color_list[i],  transforms=[
+                    ('r', [1.6, 1, 0, 0]),  # Rotate 90 degrees around the x-axis 
+                    ('t', [-1, 1.5, 0]),
+                    ])
+    renderer.add_tri_mesh(Path(root_path) / 'asset/mesh/flat_ground.obj',
+            texture_img='chkbd_24_0.7', transforms=[
+                ('s', 16),
+                ('t', [0, 0, -1]),
+                ])       
+    renderer.render()
+    
+q_default_np = np.array(default_hex_mesh.py_vertices())
 
-def compute_loss(q_curr_np, q_surface_np):
-    # add some helper functions
-    def get_element_verts_pos(element_id):
-        verts = []
-        v_ids = default_hex_mesh.py_element(element_id)
-        for i in range(8):
-            verts.append(np.array(default_hex_mesh.py_vertex(v_ids[i])))
-        return verts
-    
-    def reconstruct_trilinear(verts, weights):
-        assert len(verts) == 8 and len(weights) == 8
-        new_vert = np.zeros(3)
-        for i in range(8):
-            new_vert += np.array(verts[i] * weights[i])
-        return new_vert
-    
-    # q_curr_np is hex mesh vertices
-    # q_surface_np is surface mesh vertices: S * 3
-    dl_dq_np = np.zeros(q_curr_np.shape)
-    l2_loss = 0
-    l1_diff = 0
-    new_verts = []
-    for i, mapping in enumerate(trilinear_weights_mapping):
-        # iterate through each vertex
-        e_id = list(trilinear_weights_mapping[i].keys())[0] # this is a string 
-        e_v_ids = default_hex_mesh.py_element(int(e_id))
-        weights = mapping[e_id]
-        v_pos = q_surface_np[i]
-        # element_verts = get_element_verts_pos(int(e_id)) # this is wrong. Default mesh pos is not current mesh pos
-        element_verts = [q_curr_np[3*v_id:3*v_id+3] for v_id in e_v_ids]
-        new_pos_list = reconstruct_trilinear(element_verts, weights)
-        new_verts.append(new_pos_list)
-        interp_verts_pos = np.array(new_pos_list)
-        
-        local_l2_loss = np.sum((v_pos - interp_verts_pos)**2)
-        l1_diff += np.mean(np.abs(v_pos - interp_verts_pos))
-        dl_dSurf_q = 2 * (interp_verts_pos - v_pos)
-        # add to dl_dq
-        for j in range(8):
-            dl_dq_np[3*e_v_ids[j]:3*e_v_ids[j]+3] += dl_dSurf_q * weights[j]
-        l2_loss += local_l2_loss
-        
-    l1_diff /= len(trilinear_weights_mapping)
+def get_element_verts_pos(element_id):
+    verts = []
+    v_ids = default_hex_mesh.py_element(element_id)
+    for i in range(8):
+        verts.append(q_default_np[3*v_ids[i]])
+        verts.append(q_default_np[3*v_ids[i]+1])
+        verts.append(q_default_np[3*v_ids[i]+2])
+    return verts
+
+
+element_list = []
+v_list = []
+color_list = []
+# for e_id in range(default_hex_mesh.NumOfElements()):
+#     e_example = [i for i in range(8)]
+#     element_list.append(e_example)
+#     v_list.append(get_element_verts_pos(e_id))
+#     random_color = tuple(np.random.rand(3))
+# # print(element_list, v_list_0)
+#     color_list.append(random_color)
+# png_file = render_folder / f'cubes_{e_id}.png'
+# render_cubes(v_list, element_list, color_list, png_file)
+
+
+for frame_num in range(90, 91):
+    iter_count = 0
+    deformable_shapeTarget = HexDeformable()
+    deformable_shapeTarget.Initialize(default_hex_bin_str, density, 'none', youngs_modulus, poissons_ratio)
      
-    print("l2_loss:", l2_loss)
-    print("l1_diff:", l1_diff)
-    global iter_count, final_interp_verts, final_hex_verts
-    final_interp_verts = new_verts
-    final_hex_verts = q_curr_np
-    # construct_then_render_obj(gt_obj_path_str, new_verts, iter_count)
-    return dl_dq_np, l2_loss
-
-def loss(q_curr_np, q_ideal_np, q_surface_np):
-    flag = True  
-    if flag:
-        return compute_loss(q_curr_np, q_surface_np)
-    else:
-        return get_loss(q_curr_np, q_ideal_np)
-
-if __name__ == "__main__":
-    print("Running shape target quasi Simulation")
-    for frame_num in range(80, 121):
-        iter_count = 0
-        deformable_shapeTarget = HexDeformable()
-        deformable_shapeTarget.Initialize(default_hex_bin_str, density, 'none', youngs_modulus, poissons_ratio)
-        
-        init_obj_num = frame_num
-        target_obj_num = frame_num
-        trilinear_weights_mapping = get_trilinear_mapping()
-        gt_verts_pos = get_default_surface_verts(target_obj_num)
-        gt_obj_path_str = '/mnt/e/muscleCode/sample_muscle_data/starfish/starfish_' + str(target_obj_num) + '.obj'
-
-        # initialize local parameters
-        act_init_np, _ = get_idea_q_and_act(gt_folder, init_obj_num)
-        _, q_ideal_np = get_idea_q_and_act(gt_folder, target_obj_num) 
-        # render_deformable('default', q_init_np)
-        # render_deformable('ideal', q_ideal_np)
-        render_default_obj(gt_obj_path_str, target_obj_num)
-        # get_loss(q_init_np, q_ideal_np) 
-        print("initialial loss:")
-        loss(q_init_np, q_ideal_np, gt_verts_pos)
-
-        # deformable_shapeTarget.SetShapeTargetStiffness(1)
-        set_dirichlet_boundary()
-        # main loop
-        time_ = time.time()
-        def sim_loss_n_grad(act_np): 
-            global iter_count, time_
-            # print("iter:", iter_count)
-            q_next_np = forward_pass(act_np, q_init_np)    
-            # print("forward pass time:", time.time() - time_)
-            time_ = time.time() 
-            
-            # render_deformable('iter_'+str(iter_count), q_next_np)
-            # print("forward render time:", time.time() - time_)
-            time_ = time.time()
-            
-            dl_dq_next, l2_loss = loss(q_next_np, q_ideal_np, gt_verts_pos)
-            print("shape, " , q_init_np.shape, act_np.shape, q_next_np.shape, dl_dq_next.shape)
-            dl_dact_np = backward_pass(q_init_np, act_np, q_next_np, dl_dq_next)
-            # print("backward pass time:", time.time() - time_)
-            # print("gradient norm:", np.linalg.norm(dl_dact_np))
-            print("iter:", iter_count, ", frame num:", frame_num)
-            time_ = time.time()
-            
-            iter_count += 1
-            return l2_loss, dl_dact_np
-
-        result = scipy.optimize.minimize(sim_loss_n_grad, np.copy(act_init_np), jac=True, method='L-BFGS-B', options={'ftol': 1e-4})
-        print("Optimization Completed")
-        construct_then_render_obj(gt_obj_path_str, final_interp_verts, frame_num)
-        render_deformable(f'hex_{frame_num}', final_hex_verts)
-        # sim_loss_n_grad(act_init_np)
+    # initialize local parameters
+    act_init_np, q_ideal_np = get_idea_q_and_act(gt_folder, frame_num)
+    force = StdRealVector(0)
+    deformable_shapeTarget.PyShapeTargetForce(q_init_np, act_init_np, force)
+    force = np.array(force)
+    
+    print('force shape: ', force.shape)
+    print('force average: ', np.mean(force))
+    print('force max: ', np.max(force))
+    print('force min: ', np.min(force))
+    
+    abs_force = np.abs(force)
+    cap = 2
+    norm_max = np.minimum(abs_force, cap)
+    normalized_force = norm_max / cap
+    color_list = np.array([[nf, 0, 1] for nf in normalized_force])
+    
+    for e_id in range(default_hex_mesh.NumOfElements()):
+        e_example = [i for i in range(8)]
+        element_list.append(e_example)
+        v_list.append(get_element_verts_pos(e_id))
+        # random_color = tuple(np.random.rand(3))
+        # print(element_list, v_list_0)
+        # color_list.append(random_color)
+    png_file = render_folder / f'cubes_{e_id}.png'
+    render_cubes(v_list, element_list, color_list, png_file)
+    

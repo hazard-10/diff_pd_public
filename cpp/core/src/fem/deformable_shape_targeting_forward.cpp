@@ -292,8 +292,8 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetNonlinearSolve(co
             return q_sol;
         } 
     }
-    CheckError(success, "PD method fails to converge in Shape target foward.");
-    return VectorXr::Zero(dofs_);
+    PrintWarning("PD method fails to converge in Shape target forward.");
+    return q_sol;
 }
 
 
@@ -384,8 +384,9 @@ const real Deformable<vertex_dim, element_dim>::ShapeTargetingEnergy(const Vecto
         // const auto deformed = ScatterToElement(q, i); Not used because we enforce precomputed F_auxiliary_
         for (int j = 0; j < sample_num; ++j) {
             const auto F = F_auxiliary_[i][j].F();
-            const auto Rst = F_auxiliary_[i][j].Rst();
+            auto Rst = F_auxiliary_[i][j].Rst();
             const auto A = F_auxiliary_[i][j].A();
+            if(use_R_not_Rst) Rst = F_auxiliary_[i][j].R();
             element_energy[i] += EnergyDensity(F, Rst, A) * element_volume_ / sample_num;
         }
     }
@@ -412,8 +413,9 @@ const VectorXr Deformable<vertex_dim, element_dim>::ShapeTargetingForce(const Ve
         // const auto deformed = ScatterToElement(q, i);
         for (int j = 0; j < sample_num; ++j) {
             const auto F = F_auxiliary_[i][j].F();
-            const auto Rst = F_auxiliary_[i][j].Rst();
+            auto Rst = F_auxiliary_[i][j].Rst();
             const auto A = F_auxiliary_[i][j].A();
+            if(use_R_not_Rst) Rst = F_auxiliary_[i][j].R();
             
             Eigen::Matrix<real, vertex_dim, vertex_dim> P = StressTensor(F, Rst, A);
             const Eigen::Matrix<real, 1, vertex_dim * element_dim> f_kd =

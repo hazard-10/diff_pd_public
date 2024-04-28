@@ -54,7 +54,7 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingLocalStepDifferenti
         for (int j = 0; j < sample_num; ++j) {
             DeformationGradientAuxiliaryData<vertex_dim>& F = F_auxiliary_[i][j];
             Eigen::Matrix<real, vertex_dim, vertex_dim> A_mat = F.A();
-            Eigen::Matrix<real, vertex_dim, vertex_dim> Rst = F.Rst();
+            // Eigen::Matrix<real, vertex_dim, vertex_dim> Rst = F.Rst();
             Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> A_expand; A_expand.setZero();
             CheckError(vertex_dim == 3, "Only 3d is supported in shape targeting now");
             for(int k = 0; k < vertex_dim; ++k){
@@ -64,10 +64,14 @@ void Deformable<vertex_dim, element_dim>::SetupShapeTargetingLocalStepDifferenti
                     A_expand( vertex_dim * k + 2, vertex_dim * l + 2) = A_mat(l, k);    
                 }
             } 
-            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F.Fst(), F.Rst(), F.Sst());
-
-            w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF * A_expand * finite_element_samples_[i][j].pd_A();     
-            //                      24x9 * 9x9 * 9x9 * 9x9 * 9x24 : 24x24        
+            if(!use_R_not_Rst){
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F.Fst(), F.Rst(), F.Sst());
+                w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF * A_expand * finite_element_samples_[i][j].pd_A();     
+                //                      24x9 * 9x9 * 9x9 * 9x9 * 9x24 : 24x24 
+            }else{
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F.F(), F.R(), F.S());
+                w_GT_A_HrAF_A_G += w * finite_element_samples_[i][j].pd_At() * A_expand * dR_dF * finite_element_samples_[i][j].pd_A();
+            }       
         }
         dA[i] = w_GT_A_HrAF_A_G;
     }
@@ -446,10 +450,16 @@ void Deformable<vertex_dim, element_dim>::ShapeTargetingForceDifferential(const 
             Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> Rst_expand = expand_1(Rst_mat);
             Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> F_expand = expand_1(F_mat);
 
-            Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F_ax.Fst(), F_ax.Rst(), F_ax.Sst());
-
-            dF_dact = -1 * w * finite_element_samples_[i][j].pd_At() * (Rst_expand + A_expand * dR_dF * F_expand);
-            // 24x9 = 1 * 1 * 24x9 * 9x9 * 9x9
+            if(!use_R_not_Rst){
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F_ax.Fst(), F_ax.Rst(), F_ax.Sst());
+                dF_dact = -1 * w * finite_element_samples_[i][j].pd_At() * (Rst_expand + A_expand * dR_dF * F_expand);
+                // 24x9 = 1 * 1 * 24x9 * 9x9 * 9x9
+            }else{
+                Rst_mat = F_ax.R();
+                Rst_expand = expand_1(Rst_mat);
+                Eigen::Matrix<real, vertex_dim * vertex_dim, vertex_dim * vertex_dim> dR_dF = dRFromdF(F_ax.F(), F_ax.R(), F_ax.S());
+                dF_dact = -1 * w * finite_element_samples_[i][j].pd_At() * (Rst_expand);
+            }
              
             // todo, Z needs to be negated
             const Eigen::Matrix<real, vertex_dim * element_dim, 1> z_deformed = ScatterToElementFlattened(Z, i); // 24x1 

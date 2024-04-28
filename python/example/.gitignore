@@ -3,3 +3,5 @@ __pycache__/
 **/*.npy
 soft_starfish_3d_*/
 **/*.data
+./tmp/
+./vae_starfish

@@ -175,6 +175,14 @@ void Deformable<vertex_dim, element_dim>::PyShapeTargetingForward(const std::vec
 }
 
 template<int vertex_dim, int element_dim>
+void Deformable<vertex_dim, element_dim>::PyShapeTargetForce(const std::vector<real>& q, const std::vector<real>& act,
+    std::vector<real>& f) const {
+    ShapeTargetComputeAuxiliaryDeformationGradient(ToEigenVector(q), ToEigenVector(act));
+    VectorXr f_eig = ShapeTargetingForce(ToEigenVector(q), ToEigenVector(act));
+    f = ToStdVector(f_eig);
+}
+
+template<int vertex_dim, int element_dim>
 void Deformable<vertex_dim, element_dim>::PyShapeTargetingBackward(const std::vector<real>& q,
     const std::vector<real>& act, const std::vector<real>& q_next, 
     const std::vector<real>& dl_dq_next, const std::map<std::string, real>& options,

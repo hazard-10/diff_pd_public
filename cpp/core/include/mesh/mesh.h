@@ -12,6 +12,7 @@ public:
     void Initialize(const std::string& binary_file_name);
     void Initialize(const Eigen::Matrix<real, vertex_dim, -1>& vertices,
         const Eigen::Matrix<int, element_dim, -1>& elements);
+    void PyInitialize(const std::vector<real>& vertices, const std::vector<int>& elements);
     void SaveToFile(const std::string& file_name) const;
 
     const Eigen::Matrix<real, vertex_dim, -1>& vertices() const { return vertices_; }
