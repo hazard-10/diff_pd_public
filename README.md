@@ -1,117 +1,41 @@
-# Differentiable Projective Dynamics
+# Shape Targeting Simulation
 
-This codebase contains our research code for a few publications relevant to differentiable projective dynamics:
-- [DiffPD: Differentiable Projective Dynamics](https://people.csail.mit.edu/taodu/diffpd/index.html) (ACM Transactions on Graphics/SIGGRAPH 2022)
-- [DiffAqua: A Differentiable Computational Design Pipeline for Soft Underwater Swimmers with Shape Interpolation](http://diffaqua.csail.mit.edu/) (ACM SIGGRAPH 2021)
-- [Underwater Soft Robot Modeling and Control with Differentiable Simulation](https://people.csail.mit.edu/taodu/starfish/index.html) (IEEE RA-L/RoboSoft 2021)
+This is an unofficial implementation of the paper 
+[Learning active quasistatic physics-based models from data](https://pages.cs.wisc.edu/~qisiw/SIG.html) by Srinivasan et al, Siggraph 2021.
 
-## Recommended systems
-- Ubuntu 18.04
-- (Mini)conda 4.7.12 or higher
-- GCC 7.5 (Other versions might work but we tested the codebase with 7.5 only)
+![]('asset/readme/hex.gif')
+![]('asset/readme/default.gif')
 
-## Installation
-```
-git clone --recursive https://github.com/mit-gfx/diff_pd_public.git
-cd diff_pd_public
-conda env create -f environment.yml
-conda activate diff_pd
-./install.sh
-```
+## 1. Overview
+The pipeline of the paper includes two modules, an autoencoder and a quasistatic differentiable softbody simulator. The simulator is integrated as the final layer into the netowork. 
 
-## Examples
-Navigate to the `python/example` path and run `python [example_name].py` where the `example_name` could be the following names. By default, we use 8 threads in OpenMP to run PD simulation. This number can be modified in most of the scripts below by changing the `thread_ct` variable. It is recommended to set `thread_ct` to be **strictly smaller** than the number of cores available.
+### 1.1 Solver
+The solver formulation is from a subsequent paper [Implicit Neural Representation for Physics-driven Actuated Soft Bodies](https://studios.disneyresearch.com/app/uploads/2022/07/Implicit_Neural_Representation_for_Physics-driven_Actuated_Soft_Bodies_final-1.pdf) by Yang et al, Siggraph 2022. The paper derived an explicity formulation of the differentiation of shape targeting, which is more favorable than the iterative solution proposed in the original paper. 
 
-For an extremely quick start, run the following script:
-```
-python routing_tendon_3d.py
-python print_routing_tendon_3d.py
-```
+The solver code is adapted from [Differentiable projective dynamics](https://github.com/mit-gfx/diff_pd_public), which provided an excellent framework for general differentiable projective dynamics simulations.
 
-### Utilities
-- `generate_texture` generates a square image with bounds. This is used for rendering only.
-- `generate_torus` generates a torus model used in the examples.
-- `pbrt_renderer_demo` shows how to interface pbrt using the python wrapper.
-- `render_hex_mesh` explains how to use the external renderer (pbrt) to render a 3D hex mesh.
-- `render_quad_mesh` explains how to use matplotlib to render a 2D quad mesh.
-- `tet_demo` shows how to tetrahedralize a mesh.
-- `voxelization_demo` shows how to voxelize a mesh.
+### 1.2 Comparing to original papers
+> What this repo implemented
+* Core solver's forward and backward pass using shape targeting
+* Attaching 'zero-rest-length' springs as initialization mentioned in Sec 5.1.
+Which you will find in utility_starfish.ipynb
+* support for dirichlet boundaries, useful for regions closesly related to bone movements.
+* numerical checks for the solver
 
-### Numerical check
-- `actuation_2d` and `actuation_3d` test the implementation of the muscle model.
-- `collision_2d` compares the forward and backward implementation of collision models in Newton's methods and PD.
-- `deformable_backward_2d` and `deformable_backward_3d` uses central differencing to numerically check the gradients of forward simulation in Newton-PCG, Newton-Cholesky, and PD methods.
-- `deformable_quasi_static_3d` solves the quasi-static state of a 3D hex mesh. The hex mesh's bottom and top faces are fixed but the top face is twisted.
-- `pd_energy_2d` and `pd_energy_3d` test the implementation of vertex-based and element-based projective dynamics energies.
-- `pd_forward` verifies the forward simulation of projective dynamics by comparing it to the solutions from Newton's method.
-- `state_force_2d` and `state_force_3d` test the implementation of state-based forces (e.g., friction, hydrodynamic force, penalty force for collisions) and their gradients w.r.t. position and velocity states.
-- `run_all_tests` runs all numerical checks above.
+> What is different, but still works
+* Used hexadralization instead of tetrahedralization, conforming to Yang et al. 2022
 
-### Evaluation
-#### Sec. 6.1
-- `landscape_3d.py` and `print_landscape_3d_table.py`: generate Fig. 2 of the paper.
+> What is missing
+* Paper used mutliple simulation instance during training to speed up (when you have a batch size of 8, you will need 8 instances to handle simulation). I don't have any clues on how to implement that on a single computer with the diffpd architecture. Any hints are welcome.
+* Yang et al added a bunch of little networks to the pipeline in order to support multi-resolution, identity transfer, etc. Here we only have the core network.
+* Mandible tracking.
+* Collision handling. While it is absolutely doable with diffpd (and have been done by the same research group [recently](https://studios.disneyresearch.com/app/uploads/2023/11/An-Implicit-Physical-Face-Model-Driven-by-Expression-and-Style-Paper.pdf))
 
-#### Sec. 6.2
-- `cantilever_3d.py` and `print_cantilever_3d_table.py`: generate Fig. 3 of the paper.
-- `rolling_sphere_3d.py` and `print_rolling_sphere_3d_table.py`: generate Fig. 4 of the paper.
-- `render_cantilever_3d.py`: generate mesh data for the `Cantilever` video.
-- `render_rolling_sphere_3d.py`: generated mesh data for the `Rolling sphere` video.
+## 2. Data
+Yang et al used a starfish example directly generated from diffpd, which I couldn't produce for some reasons. Therefore I purchased rather cheap starfish animation sequence from sketchfab [(link)](https://sketchfab.com/3d-models/lowpoly-starfish-43c0d848da2d43d8a145046d12bf63b4) as the drop-in replacement.
 
-#### Sec. 6.3
-- `slope_3d.py` and `render_slope_3d.py`: generate Fig. 5 of the paper.
-- `duck_3d.py` and `render_duck_3d.py`: generate Fig. 6 of the paper.
-- `napkin_3d.py` and `render_napkin_3d.py`: generate Fig. 7 of the paper.
+## 3. Installation
+Please refer to diff-pd installation guide [here](https://github.com/mit-gfx/diff_pd_public/tree/master)
 
-### Applications
-#### Sec. 7.1
-**Plant**
-- `plant_3d.py`: run the `Plant` example on GCP (Google Cloud Platform. See the paper for its detail specification).
-- `print_plant_3d.py`: generate data for Table 3 and Fig. 1 in supplemental material.
-- `render_plant_3d.py`: generate mesh data for the `Plant` video.
-
-**Bouncing ball**
-- `bouncing_ball_3d.py`: run the `Bouncing ball` example on GCP.
-- `print_bouncing_ball_3d.py`: generate data for Table 3 and Fig. 2 in supplemental material.
-- `render_bouncing_ball_3d.py`: generate mesh data for the `Bouncing ball` video.
-
-#### Sec. 7.2
-**Bunny**
-- `bunny_3d.py`: run the `Bunny` example on GCP.
-- `print_bunny_3d.py`: generate data for Table 3 and Fig. 3 in supplemental material.
-- `render_bunny_3d.py`: generate mesh data for the `Bunny` video.
-
-**Routing tendon**
-- `routing_tendon_3d.py`: run the `Routing tendon` example on GCP.
-- `print_routing_tendon_3d.py`: generate data for Table 3 and Fig. 4 in supplemental materal.
-- `render_routing_tendon_3d.py`: generate mesh data for the `Routing tendon` video.
-
-#### Sec. 7.3
-**Torus**
-- `torus_3d.py`: run the `Torus` example on GCP.
-- `print_torus_3d.py`: generate data for Table 3 and Fig. 5 in supplemental material.
-- `render_torus_3d.py`: generate mesh data for the `Torus` video.
-
-**Quadruped**
-- `quadruped_3d.py`: run the `Quadruped` example on GCP.
-- `print_quadruped_3d.py`: generated data for Table 3 and Fig. 6 in supplemental material.
-- `render_quadruped_3d.py`: generate mesh data for the `Quadruped` video.
-
-**Cow**
-- `cow_3d.py`: run the `Cow` example on GCP.
-- `print_cow_3d.py`: generate date for Table 3 and Fig. 7 in supplemental material.
-- `render_cow_3d.py`: generate mesh data for the `Cow` video.
-
-#### Sec. 7.4
-Examples in this section require non-trivial setup of deep reinforcement learning pipelines. Please check out the [code](https://github.com/mit-gfx/DiffAqua) from our related paper [DiffAqua](http://diffaqua.csail.mit.edu/) for running fish examples.
-
-#### Sec. 7.5
-This section requires taking videos manually. Contact `taodu@csail.mit.edu` for more details.
-
-#### Sec. 8
-- `armadillo_3d.py`: generate the Armadillo experiment with Neohookean materials. This may take 5 minutes before rendering the results.
-
-### Starfish
-- `soft_starfish_3d.py`, `display_soft_starfish_3d.py`, and `render_soft_starfish_3d.py` are the scripts we used to generate results in the IEEE RA-L paper [Underwater Soft Robot Modeling and Control with Differentiable Simulation](https://people.csail.mit.edu/taodu/starfish/index.html) (IEEE RA-L/RoboSoft 2021). It involves non-trivial setup of hardware. Contact `taodu@csail.mit.edu` for more details.
-
-## Contact
-If you have trouble running any scripts above, please feel free to open an issue or email `taodu@csail.mit.edu`.
+## 4. How to Run
+[wip]
